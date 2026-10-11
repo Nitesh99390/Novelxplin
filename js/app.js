@@ -1,0 +1,248 @@
+/* =========================================================
+   Shared UI: header, footer, modal, helpers, components
+   ========================================================= */
+(function () {
+  const $ = (s, el) => (el || document).querySelector(s);
+  const $$ = (s, el) => Array.from((el || document).querySelectorAll(s));
+  const esc = s => String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const q = new URLSearchParams(location.search);
+
+  /* ---------- SVG icons ---------- */
+  const I = {
+    search: '<svg class="icon" viewBox="0 0 24 24"><path d="M15.5 14h-.8l-.3-.3A6.5 6.5 0 1 0 14 15.5l.3.3v.8l5 5 1.5-1.5-5-5zm-6 0a4.5 4.5 0 1 1 0-9 4.5 4.5 0 0 1 0 9z"/></svg>',
+    globe: '<svg class="icon" viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm6.9 6h-3a15.6 15.6 0 0 0-1.4-3.6A8 8 0 0 1 18.9 8zM12 4a14 14 0 0 1 1.9 4h-3.8A14 14 0 0 1 12 4zM4.3 14a8 8 0 0 1 0-4h3.4a16 16 0 0 0 0 4H4.3zm.8 2h3a15.6 15.6 0 0 0 1.4 3.6A8 8 0 0 1 5.1 16zm3-8h-3a8 8 0 0 1 4.3-3.6A15.6 15.6 0 0 0 8.1 8zM12 20a14 14 0 0 1-1.9-4h3.8A14 14 0 0 1 12 20zm2.3-6H9.7a14.7 14.7 0 0 1 0-4h4.6a14.7 14.7 0 0 1 0 4zm.3 5.6a15.6 15.6 0 0 0 1.4-3.6h3a8 8 0 0 1-4.4 3.6zm1.7-5.6a16 16 0 0 0 0-4h3.4a8 8 0 0 1 0 4h-3.4z"/></svg>',
+    list: '<svg class="icon" viewBox="0 0 24 24"><path d="M3 13h2v-2H3v2zm0 4h2v-2H3v2zm0-8h2V7H3v2zm4 4h14v-2H7v2zm0 4h14v-2H7v2zM7 7v2h14V7H7z"/></svg>',
+    refresh: '<svg class="icon" viewBox="0 0 24 24"><path d="M17.65 6.35A8 8 0 1 0 19.7 14h-2.1a6 6 0 1 1-1.4-6.2L13 11h7V4l-2.35 2.35z"/></svg>',
+    tag: '<svg class="icon" viewBox="0 0 24 24"><path d="M21.4 11.6l-9-9A2 2 0 0 0 11 2H4a2 2 0 0 0-2 2v7c0 .5.2 1 .6 1.4l9 9a2 2 0 0 0 2.8 0l7-7a2 2 0 0 0 0-2.8zM5.5 7A1.5 1.5 0 1 1 7 5.5 1.5 1.5 0 0 1 5.5 7z"/></svg>',
+    dot: '<svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M10 16l6-4-6-4z" fill="#fff"/></svg>',
+    rocket: '<svg class="icon" viewBox="0 0 24 24"><path d="M12 2.5s4.5 2 4.5 9.5c0 2.5-.6 4.4-1.3 5.8l1.8 3.7-3.2-1.6a4.6 4.6 0 0 1-3.6 0L7 21.5l1.8-3.7C8.1 16.4 7.5 14.5 7.5 12 7.5 5 12 2.5 12 2.5zm0 6a2 2 0 1 0 0 4 2 2 0 0 0 0-4z"/></svg>',
+    qr: '<svg class="icon" viewBox="0 0 24 24"><path d="M3 11h8V3H3v8zm2-6h4v4H5V5zM3 21h8v-8H3v8zm2-6h4v4H5v-4zm8-12v8h8V3h-8zm6 6h-4V5h4v4zm-6 4h2v2h-2zm2 2h2v2h-2zm-2 2h2v2h-2zm4 0h2v2h-2zm2-2h2v2h-2zm-2-4h2v2h-2zm2 2h2v2h-2zm-4 6h2v2h-2zm4 0h2v2h-2z"/></svg>',
+    shelf: '<svg class="icon" viewBox="0 0 24 24"><path d="M4 3h4v18H4zm6 0h4v18h-4zm7.3.6l3.9 1-4.4 16.4-3.9-1z"/></svg>',
+    user: '<svg class="icon" viewBox="0 0 24 24"><path d="M12 12a5 5 0 1 0 0-10 5 5 0 0 0 0 10zm0 2c-3.3 0-10 1.7-10 5v3h20v-3c0-3.3-6.7-5-10-5z"/></svg>',
+    menu: '<svg class="icon" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>',
+    horn: '<svg class="icon" viewBox="0 0 24 24"><path d="M3 10v4a1 1 0 0 0 1 1h3l5 4V5L7 9H4a1 1 0 0 0-1 1zm13.5 2a4.5 4.5 0 0 0-2.5-4v8a4.5 4.5 0 0 0 2.5-4zM14 3.2v2.1a7 7 0 0 1 0 13.4v2.1a9 9 0 0 0 0-17.6z"/></svg>',
+    book: '<svg class="icon" viewBox="0 0 24 24"><path d="M18 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2zm-1 16H7v-2h10v2zm0-4H7v-2h10v2zm0-4H7V8h10v2z"/></svg>',
+    star: '<svg class="icon" viewBox="0 0 24 24"><path d="M12 17.3l6.2 3.7-1.6-7 5.4-4.7-7.2-.6L12 2 9.2 8.7 2 9.3l5.4 4.7-1.6 7z"/></svg>',
+    heart: '<svg class="icon" viewBox="0 0 24 24"><path d="M12 21.4l-1.4-1.3C5.4 15.4 2 12.3 2 8.5 2 5.4 4.4 3 7.5 3c1.7 0 3.4.8 4.5 2.1A6 6 0 0 1 16.5 3C19.6 3 22 5.4 22 8.5c0 3.8-3.4 6.9-8.6 11.6L12 21.4z"/></svg>',
+    chev: '<svg class="icon" viewBox="0 0 24 24"><path d="M10 6L8.6 7.4 13.2 12l-4.6 4.6L10 18l6-6z"/></svg>',
+    left: '<svg class="icon" viewBox="0 0 24 24"><path d="M15.4 7.4L14 6l-6 6 6 6 1.4-1.4L10.8 12z"/></svg>',
+    right: '<svg class="icon" viewBox="0 0 24 24"><path d="M10 6L8.6 7.4 13.2 12l-4.6 4.6L10 18l6-6z"/></svg>',
+    home: '<svg class="icon" viewBox="0 0 24 24"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg>',
+    up: '<svg class="icon" viewBox="0 0 24 24"><path d="M7.4 15.4L12 10.8l4.6 4.6L18 14l-6-6-6 6z"/></svg>',
+    eye: '<svg class="icon" viewBox="0 0 24 24"><path d="M12 4.5C7 4.5 2.7 7.6 1 12c1.7 4.4 6 7.5 11 7.5s9.3-3.1 11-7.5c-1.7-4.4-6-7.5-11-7.5zm0 12.5a5 5 0 1 1 0-10 5 5 0 0 1 0 10zm0-8a3 3 0 1 0 0 6 3 3 0 0 0 0-6z"/></svg>',
+    pen: '<svg class="icon" viewBox="0 0 24 24"><path d="M3 17.3V21h3.8L17.8 9.9l-3.7-3.8L3 17.3zM20.7 7a1 1 0 0 0 0-1.4l-2.3-2.3a1 1 0 0 0-1.4 0l-1.8 1.8 3.7 3.8L20.7 7z"/></svg>',
+    clock: '<svg class="icon" viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm.5 5H11v6l5.2 3.1.8-1.2-4.5-2.7z"/></svg>',
+    check: '<svg class="icon" viewBox="0 0 24 24"><path d="M9 16.2L4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4z"/></svg>'
+  };
+  window.ICONS = I;
+
+  /* ---------- LocalStorage helpers ---------- */
+  const store = {
+    get(k, d) { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } },
+    set(k, v) { localStorage.setItem(k, JSON.stringify(v)); }
+  };
+  const Lib = {
+    list() { return store.get("fwn_library", []); },
+    has(id) { return this.list().includes(id); },
+    toggle(id) { const l = this.list(); const i = l.indexOf(id); i >= 0 ? l.splice(i, 1) : l.unshift(id); store.set("fwn_library", l); return i < 0; },
+    history() { return store.get("fwn_history", {}); },
+    mark(id, chap) { const h = this.history(); h[id] = { chap, at: Date.now() }; store.set("fwn_history", h); }
+  };
+  const Auth = {
+    user() { return store.get("fwn_user", null); },
+    login() { const u = { name: "Reader", email: "reader@example.com" }; store.set("fwn_user", u); return u; },
+    logout() { localStorage.removeItem("fwn_user"); }
+  };
+  window.Lib = Lib; window.Auth = Auth;
+
+  /* ---------- Toast ---------- */
+  function toast(msg) {
+    let t = $(".toast"); if (!t) { t = document.createElement("div"); t.className = "toast"; document.body.appendChild(t); }
+    t.textContent = msg; t.classList.add("show"); clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove("show"), 2200);
+  }
+  window.toast = toast;
+
+  /* ---------- Header ---------- */
+  function genreLinks(cls) {
+    return DB.GENRES.map(g => `<a href="genre.html?g=${encodeURIComponent(g)}" class="${cls || ""}">${esc(g)}</a>`).join("");
+  }
+  function header() {
+    const user = Auth.user();
+    const userHtml = user
+      ? `<a class="login-btn user-pill" href="library.html" title="${esc(user.email)}"><span class="avatar">${esc(user.name[0])}</span>${esc(user.name)}</a>`
+      : `<button class="login-btn" id="loginBtn">${I.user} Login/Signup</button>`;
+    return `
+    <header class="header">
+      <div class="wrap">
+        <a class="logo" href="index.html"><span class="logo-badge">F</span><span class="logo-text"><span><span class="n">Free</span>WebNOVEL</span></span></a>
+        <ul class="main-nav">
+          <li><a href="#" data-dd>Novel list <span class="caret"></span></a>
+            <div class="dropdown">
+              <a href="library.html">Your Library</a>
+              <a href="list.html?sort=latest-novel">Latest Novels</a>
+              <a href="list.html?sort=latest-release">Latest Release</a>
+              <a href="list.html?sort=most-popular">Most Popular</a>
+              <a href="list.html?sort=completed">Completed Novels</a>
+              <a href="finder.html">Novel Finder<span class="new">New</span></a>
+            </div>
+          </li>
+          <li><a href="#" data-dd>Genres <span class="caret"></span></a>
+            <div class="dropdown genres">${genreLinks()}</div>
+          </li>
+          <li><a class="nav-rocket" href="list.html?sort=most-popular" title="Hot novels">${I.rocket}</a></li>
+        </ul>
+        <div class="header-right">
+          <a class="icon-btn" href="#" title="Mobile app" id="qrBtn">${I.qr}</a>
+          <a class="icon-btn" href="library.html" title="Your Library">${I.shelf}</a>
+          <form class="search-form" action="search.html" method="get" role="search">
+            <input type="text" name="q" placeholder="Search novels" autocomplete="off" value="${esc(q.get("q") || "")}">
+            <button type="submit" aria-label="Search">${I.search}</button>
+          </form>
+          ${userHtml}
+          <button class="hamburger" id="hamburger" aria-label="Menu">${I.menu}</button>
+        </div>
+      </div>
+      <nav class="mobile-nav" id="mobileNav">
+        <div class="m-title">Novel list</div>
+        <a href="library.html">Your Library</a>
+        <a href="list.html?sort=latest-novel">Latest Novels</a>
+        <a href="list.html?sort=latest-release">Latest Release</a>
+        <a href="list.html?sort=most-popular">Most Popular</a>
+        <a href="list.html?sort=completed">Completed Novels</a>
+        <a href="finder.html">Novel Finder</a>
+        <div class="m-title">Genres</div>
+        <div class="m-genres">${genreLinks()}</div>
+      </nav>
+      <div class="mobile-search">
+        <form class="search-form" action="search.html" method="get" role="search">
+          <input type="text" name="q" placeholder="Search novels" value="${esc(q.get("q") || "")}">
+          <button type="submit" aria-label="Search">${I.search}</button>
+        </form>
+      </div>
+    </header>
+    <div class="notice"><div class="wrap">${I.horn} <span>Read Novels Online &amp; Discover Free Stories</span></div></div>`;
+  }
+
+  function footer() {
+    return `
+    <footer class="footer">
+      <div class="wrap">
+        <div class="brand">Freewebnovel.Com</div>
+        <div>Read Novels Online &amp; Discover Free Stories</div>
+        <div class="links"><a href="#">Contact</a><a href="#">Sitemap</a></div>
+        <div class="links"><a href="#">Privacy Policy &amp; Terms of use</a></div>
+        <div class="copy">&copy; ${new Date().getFullYear()} Freewebnovel. All rights reserved.</div>
+      </div>
+    </footer>
+    <div class="modal-bg" id="loginModal">
+      <div class="modal" role="dialog" aria-modal="true">
+        <div class="modal-head"><h3>Welcome to Freewebnovel</h3><button id="closeModal" aria-label="Close">&times;</button></div>
+        <div class="modal-body">
+          <p>Create or log into your account to access terrific novels and protect your data.</p>
+          <button class="g-btn" id="googleLogin">
+            <svg width="18" height="18" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.5 0 6.7 1.2 9.2 3.6l6.9-6.9C35.9 2.4 30.3 0 24 0 14.6 0 6.5 5.4 2.6 13.3l8 6.2C12.5 13.6 17.8 9.5 24 9.5z"/><path fill="#4285F4" d="M46.5 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.7c-.6 3-2.3 5.5-4.8 7.2l7.7 6c4.5-4.2 6.9-10.3 6.9-17.7z"/><path fill="#FBBC05" d="M10.6 28.5A14.5 14.5 0 0 1 9.8 24c0-1.6.3-3.1.8-4.5l-8-6.2A24 24 0 0 0 0 24c0 3.9.9 7.5 2.6 10.7l8-6.2z"/><path fill="#34A853" d="M24 48c6.3 0 11.7-2.1 15.6-5.7l-7.7-6c-2.1 1.4-4.8 2.3-7.9 2.3-6.2 0-11.5-4.1-13.4-9.8l-8 6.2C6.5 42.6 14.6 48 24 48z"/></svg>
+            Log in with Google
+          </button>
+          <p class="hint">Don't Have an account? Click above to create an account.</p>
+          <p class="legal"><a href="#">Terms of Service</a> / <a href="#">Privacy Policy</a></p>
+        </div>
+      </div>
+    </div>
+    <button class="to-top" id="toTop" aria-label="Scroll to top">${I.up}</button>`;
+  }
+
+  /* ---------- Components ---------- */
+  function cover(n, extra) {
+    const full = n.status === "Completed" && extra && extra.fullRibbon ? " full-badge" : "";
+    return `<a class="cover${full}" href="novel.html?n=${n.slug}" style="background:${n.color}"><span class="glyph">${n.glyph}</span><span class="cover-title">${esc(n.title)}</span></a>`;
+  }
+  function stars(r) {
+    const pct = Math.max(0, Math.min(100, (r / 5) * 100));
+    const s = I.star.repeat(5);
+    return `<span class="stars"><b>${r.toFixed(1)}</b><span class="star-row">${s}<span class="fill" style="width:${pct}%">${s}</span></span></span>`;
+  }
+  function metaLines(n, opts) {
+    const g = n.genres.slice(0, 2).map(x => `<a href="genre.html?g=${encodeURIComponent(x)}">${esc(x)}</a>`).join(", ");
+    const full = (opts && opts.showFull && n.status === "Completed") ? `<span class="chip full">Full</span>` : "";
+    return `<div class="meta">${I.globe} <span>${esc(n.lang)}</span></div>
+      <div class="meta">${I.list} <span>${g}</span></div>
+      <div>${full}<span class="chip">${n.chapters} Chapters</span></div>`;
+  }
+  function nCard(n, opts) {
+    return `<div class="n-card">${cover(n, opts)}<div><h3 class="truncate"><a href="novel.html?n=${n.slug}">${esc(n.title)}</a>${n.hot ? '<span class="badge-hot">HOT</span>' : ""}</h3>${stars(n.rating)}${metaLines(n, opts)}</div></div>`;
+  }
+  function releaseRow(n) {
+    const ch = n.chapters;
+    const ct = DB.chapterTitle(n, ch).replace(/^Chapter /, "");
+    return `<li>
+      ${cover(n)}
+      <div class="title truncate"><a href="novel.html?n=${n.slug}">${esc(n.title)}</a>${n.hot ? '<span class="badge-hot">HOT</span>' : ""}${n.isNew ? '<span class="badge-new">NEW</span>' : ""}</div>
+      <div class="genres truncate">${n.genres.slice(0, 2).map(esc).join(", ")}</div>
+      <a class="chap truncate" href="read.html?n=${n.slug}&c=${ch}" title="${esc("Chapter " + ct)}">Chapter ${esc(ct)}</a>
+      <div class="time">${DB.timeAgo(n.updatedMinutesAgo)}</div>
+    </li>`;
+  }
+  function rankList(list) {
+    return `<ul class="rank-list">${list.map((n, i) => `<li><div class="num">${i + 1}</div>${cover(n)}<div><div class="t truncate"><a href="novel.html?n=${n.slug}">${esc(n.title)}</a></div><div class="s">${stars(n.rating)}</div><div class="s truncate">${n.genres.slice(0, 2).map(esc).join(", ")} &middot; ${n.chapters} ch</div></div></li>`).join("")}</ul>`;
+  }
+  function genreGrid() {
+    return `<div class="genre-grid">${DB.GENRES.map(g => `<a href="genre.html?g=${encodeURIComponent(g)}" class="${DB.GENRE_COLORS[g] || ""}">${I.dot} ${esc(g)}</a>`).join("")}</div>`;
+  }
+  function pagination(page, pages, mk) {
+    if (pages <= 1) return "";
+    const out = [];
+    const add = (p, label, cls) => out.push(p === page ? `<span class="active">${label}</span>` : `<a href="${mk(p)}" class="${cls || ""}">${label}</a>`);
+    if (page > 1) add(page - 1, "&laquo;");
+    const win = new Set([1, 2, pages - 1, pages, page - 1, page, page + 1].filter(p => p >= 1 && p <= pages));
+    let last = 0;
+    [...win].sort((a, b) => a - b).forEach(p => { if (p - last > 1) out.push(`<span class="dots">…</span>`); add(p, p); last = p; });
+    if (page < pages) add(page + 1, "&raquo;");
+    return `<div class="pagination">${out.join("")}</div>`;
+  }
+  function panel(title, icon, body, more) {
+    return `<section class="panel"><div class="panel-head"><h2>${icon || ""} ${esc(title)}</h2>${more ? `<a class="more" href="${more}">See more</a>` : ""}</div>${body}</section>`;
+  }
+  function breadcrumb(items) {
+    return `<nav class="breadcrumb">${items.map((it, i) => (i ? '<span class="sep">›</span>' : "") + (it.href ? `<a href="${it.href}">${esc(it.label)}</a>` : `<span>${esc(it.label)}</span>`)).join("")}</nav>`;
+  }
+
+  window.UI = { $, $$, esc, q, cover, stars, metaLines, nCard, releaseRow, rankList, genreGrid, pagination, panel, breadcrumb, header, footer, I };
+
+  /* ---------- Boot ---------- */
+  document.addEventListener("DOMContentLoaded", () => {
+    const h = $("#siteHeader"); if (h) h.innerHTML = header();
+    const f = $("#siteFooter"); if (f) f.innerHTML = footer();
+
+    // dropdowns
+    $$("[data-dd]").forEach(a => a.addEventListener("click", e => {
+      e.preventDefault(); const li = a.parentElement; const open = li.classList.contains("open");
+      $$(".main-nav > li.open").forEach(x => x.classList.remove("open")); if (!open) li.classList.add("open");
+    }));
+    $$(".main-nav > li").forEach(li => {
+      li.addEventListener("mouseenter", () => { if (li.querySelector(".dropdown")) li.classList.add("open"); });
+      li.addEventListener("mouseleave", () => li.classList.remove("open"));
+    });
+    document.addEventListener("click", e => { if (!e.target.closest(".main-nav")) $$(".main-nav > li.open").forEach(x => x.classList.remove("open")); });
+
+    // mobile
+    const hb = $("#hamburger"); if (hb) hb.addEventListener("click", () => $("#mobileNav").classList.toggle("show"));
+
+    // login modal
+    const modal = $("#loginModal");
+    const openModal = () => modal && modal.classList.add("show");
+    const closeModal = () => modal && modal.classList.remove("show");
+    $("#loginBtn")?.addEventListener("click", openModal);
+    $("#closeModal")?.addEventListener("click", closeModal);
+    modal?.addEventListener("click", e => { if (e.target === modal) closeModal(); });
+    $("#googleLogin")?.addEventListener("click", () => { Auth.login(); toast("Logged in (demo) – backend coming soon"); setTimeout(() => location.reload(), 600); });
+    $("#qrBtn")?.addEventListener("click", e => { e.preventDefault(); toast("Mobile app coming soon"); });
+    window.openLogin = openModal;
+
+    // scroll top
+    const tt = $("#toTop");
+    window.addEventListener("scroll", () => tt && tt.classList.toggle("show", scrollY > 400), { passive: true });
+    tt?.addEventListener("click", () => scrollTo({ top: 0, behavior: "smooth" }));
+
+    document.dispatchEvent(new CustomEvent("app:ready"));
+  });
+})();

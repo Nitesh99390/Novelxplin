@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Novel List - Free Web Novel</title>
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Roboto+Condensed:wght@400;700&display=swap" rel="stylesheet">
+  <link rel="icon" type="image/svg+xml" href="img/favicon.svg">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div id="siteHeader"></div>
+  <main class="page">
+    <div class="wrap">
+      <div id="crumb"></div>
+      <div class="grid-2">
+        <div>
+          <section class="panel">
+            <div class="panel-head"><h2 id="title"></h2><span class="more" id="count" style="color:var(--muted)"></span></div>
+            <div class="tabs" id="tabs"></div>
+            <div class="novel-grid" id="grid"></div>
+            <div id="pager"></div>
+          </section>
+        </div>
+        <aside class="sidebar-stack">
+          <section class="panel">
+            <div class="panel-head"><h2 id="gTitle"></h2></div>
+            <div id="genres"></div>
+          </section>
+          <section class="panel">
+            <div class="panel-head"><h2 id="rTitle"></h2></div>
+            <div id="ranking"></div>
+          </section>
+        </aside>
+      </div>
+    </div>
+  </main>
+  <div id="siteFooter"></div>
+  <script src="js/data.js"></script>
+  <script src="js/app.js"></script>
+  <script>
+    document.addEventListener("app:ready", () => {
+      const { $, esc, q, nCard, genreGrid, rankList, pagination, breadcrumb, I } = UI;
+      const PER = 18;
+      const page = Math.max(1, parseInt(q.get("page") || "1", 10));
+      const sort = q.get("sort") || "latest-novel";
+      const genre = q.get("g");
+      const query = q.get("q");
+      const status = q.get("status") || "all";
+
+      let list, title, crumbLabel, base;
+      if (query !== null) {
+        list = DB.search(query);
+        title = `Search results for "${query}"`; crumbLabel = "Search"; base = `search.html?q=${encodeURIComponent(query)}`;
+        document.title = `Search: ${query} - Free Web Novel`;
+      } else if (genre) {
+        list = DB.byGenre(genre);
+        title = `${genre} Novels`; crumbLabel = genre; base = `genre.html?g=${encodeURIComponent(genre)}`;
+        document.title = `${genre} Novels - Free Web Novel`;
+      } else {
+        const map = {
+          "latest-novel": ["Latest Novels", DB.latestNovels()],
+          "latest-release": ["Latest Release Novels", DB.latestRelease()],
+          "most-popular": ["Most Popular Novels", DB.mostPopular()],
+          "completed": ["Completed Novels", DB.completed()]
+        };
+        const m = map[sort] || map["latest-novel"];
+        title = m[0]; list = m[1]; crumbLabel = m[0]; base = `list.html?sort=${sort}`;
+        document.title = `${m[0]} - Free Web Novel`;
+      }
+      if (status !== "all") list = list.filter(n => n.status.toLowerCase() === status);
+
+      const pages = Math.max(1, Math.ceil(list.length / PER));
+      const cur = Math.min(page, pages);
+      const slice = list.slice((cur - 1) * PER, cur * PER);
+      const mk = p => `${base}${base.includes("?") ? "&" : "?"}status=${status}&page=${p}`;
+      const tab = (s, label) => `<a href="${base}${base.includes("?") ? "&" : "?"}status=${s}" class="${status === s ? "active" : ""}">${label}</a>`;
+
+      $("#crumb").innerHTML = breadcrumb([{ label: "Home", href: "index.html" }, { label: crumbLabel }]);
+      $("#title").innerHTML = `${I.list} ${esc(title)}`;
+      $("#count").textContent = `${list.length} novels`;
+      $("#tabs").innerHTML = tab("all", "All") + tab("ongoing", "Ongoing") + tab("completed", "Completed");
+      $("#grid").innerHTML = slice.length
+        ? slice.map(n => nCard(n, { showFull: true, fullRibbon: true })).join("")
+        : `<div class="empty" style="grid-column:1/-1">${I.search}<div>No novels found.</div></div>`;
+      $("#pager").innerHTML = pagination(cur, pages, mk);
+      $("#gTitle").innerHTML = `${I.list} Genres`;
+      $("#genres").innerHTML = genreGrid();
+      $("#rTitle").innerHTML = `${I.star} Top Rated`;
+      $("#ranking").innerHTML = rankList(DB.rankByRating(10));
+    });
+  </script>
+</body>
+</html>
