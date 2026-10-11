@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Novel Finder - Free Web Novel</title>
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Roboto+Condensed:wght@400;700&display=swap" rel="stylesheet">
+  <link rel="icon" type="image/svg+xml" href="img/favicon.svg">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div id="siteHeader"></div>
+  <main class="page">
+    <div class="wrap">
+      <div id="crumb"></div>
+      <section class="panel" style="margin-bottom:14px">
+        <div class="panel-head"><h2 id="fTitle"></h2><a class="more" href="finder.html">Reset</a></div>
+        <form class="filter-box" id="filters">
+          <div class="row"><div class="k">Genres</div><div class="opts" id="gOpts"></div></div>
+          <div class="row"><div class="k">Type</div><div class="opts" id="tOpts"></div></div>
+          <div class="row"><div class="k">Status</div><div class="opts">
+            <label><input type="radio" name="status" value="" checked> All</label>
+            <label><input type="radio" name="status" value="Ongoing"> Ongoing</label>
+            <label><input type="radio" name="status" value="Completed"> Completed</label>
+          </div></div>
+          <div class="row"><div class="k">Chapters</div><div class="opts">
+            <label><input type="radio" name="chap" value="" checked> Any</label>
+            <label><input type="radio" name="chap" value="0-100"> &lt; 100</label>
+            <label><input type="radio" name="chap" value="100-500"> 100 - 500</label>
+            <label><input type="radio" name="chap" value="500-1500"> 500 - 1500</label>
+            <label><input type="radio" name="chap" value="1500-99999"> 1500+</label>
+          </div></div>
+          <div class="row"><div class="k">Sort by</div><div><select name="sort">
+            <option value="popular">Most Popular</option>
+            <option value="rating">Top Rated</option>
+            <option value="updated">Recently Updated</option>
+            <option value="chapters">Most Chapters</option>
+            <option value="new">Newest</option>
+          </select></div></div>
+        </form>
+      </section>
+      <section class="panel">
+        <div class="panel-head"><h2 id="rTitle"></h2><span class="more" id="count" style="color:var(--muted)"></span></div>
+        <div class="novel-grid" id="grid"></div>
+      </section>
+    </div>
+  </main>
+  <div id="siteFooter"></div>
+  <script src="js/data.js"></script>
+  <script src="js/app.js"></script>
+  <script>
+    document.addEventListener("app:ready", () => {
+      const { $, $$, esc, nCard, breadcrumb, I } = UI;
+      $("#crumb").innerHTML = breadcrumb([{ label: "Home", href: "index.html" }, { label: "Novel Finder" }]);
+      $("#fTitle").innerHTML = `${I.search} Novel Finder`;
+      $("#rTitle").innerHTML = `${I.list} Results`;
+      $("#gOpts").innerHTML = DB.GENRES.map(g => `<label><input type="checkbox" name="g" value="${esc(g)}"> ${esc(g)}</label>`).join("");
+      $("#tOpts").innerHTML = DB.LANGS.map(l => `<label><input type="checkbox" name="t" value="${esc(l)}"> ${esc(l.replace(" Novel", ""))}</label>`).join("");
+
+      function run() {
+        const fd = new FormData($("#filters"));
+        const gs = fd.getAll("g"), ts = fd.getAll("t"), st = fd.get("status"), ch = fd.get("chap"), sort = fd.get("sort");
+        let list = DB.novels.filter(n =>
+          (!gs.length || gs.every(g => n.genres.includes(g))) &&
+          (!ts.length || ts.includes(n.lang)) &&
+          (!st || n.status === st) &&
+          (!ch || (n.chapters >= +ch.split("-")[0] && n.chapters < +ch.split("-")[1]))
+        );
+        const s = { popular: (a, b) => b.views - a.views, rating: (a, b) => b.rating - a.rating, updated: (a, b) => a.updatedMinutesAgo - b.updatedMinutesAgo, chapters: (a, b) => b.chapters - a.chapters, new: (a, b) => b.id - a.id };
+        list.sort(s[sort] || s.popular);
+        $("#count").textContent = `${list.length} novels`;
+        $("#grid").innerHTML = list.length ? list.map(n => nCard(n, { showFull: true, fullRibbon: true })).join("") : `<div class="empty" style="grid-column:1/-1">${I.search}<div>No novels match these filters.</div></div>`;
+      }
+      $("#filters").addEventListener("change", run);
+      run();
+    });
+  </script>
+</body>
+</html>

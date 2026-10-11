@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Read - Free Web Novel</title>
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Roboto+Condensed:wght@400;700&display=swap" rel="stylesheet">
+  <link rel="icon" type="image/svg+xml" href="img/favicon.svg">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body class="reader-page">
+  <div id="siteHeader"></div>
+  <div class="reader-top"><div class="wrap">
+    <a href="index.html" title="Home"></a>
+    <span class="novel-title truncate" id="rtTitle"></span>
+    <a class="btn ghost" style="height:30px;padding:0 10px" href="#" id="rtLib"></a>
+  </div></div>
+
+  <main class="reader-wrap">
+    <div class="reader-nav" id="navTop"></div>
+
+    <div class="reader-settings" id="settings">
+      <div class="grp"><label>Theme</label>
+        <button data-theme="paper" title="Paper"><span class="sw" style="background:#f4f1ea;border-color:#ccc"></span></button>
+        <button data-theme="light" title="Light"><span class="sw" style="background:#fff;border-color:#ccc"></span></button>
+        <button data-theme="sepia" title="Sepia"><span class="sw" style="background:#e9dcc4"></span></button>
+        <button data-theme="dark" title="Dark"><span class="sw" style="background:#1c1c1c"></span></button>
+      </div>
+      <div class="grp"><label>Font size</label><button data-size="-1">A-</button><button id="sizeLabel" disabled></button><button data-size="1">A+</button></div>
+      <div class="grp"><label>Font</label><button data-font="serif">Serif</button><button data-font="sans">Sans</button></div>
+      <div class="grp"><label>Line height</label><button data-lh="1.6">1.6</button><button data-lh="1.8">1.8</button><button data-lh="2.1">2.1</button></div>
+    </div>
+
+    <article class="chapter-content" id="content"></article>
+
+    <div class="reader-nav" id="navBottom"></div>
+
+    <section class="comment-box">
+      <h3>Comments</h3>
+      <textarea placeholder="Share your thoughts about this chapter..." id="cText"></textarea>
+      <div style="display:flex;justify-content:flex-end;margin-top:8px"><button class="btn" id="cPost">Post comment</button></div>
+      <div id="comments"></div>
+    </section>
+  </main>
+
+  <div id="siteFooter"></div>
+  <script src="js/data.js"></script>
+  <script src="js/app.js"></script>
+  <script>
+    document.addEventListener("app:ready", () => {
+      const { $, $$, esc, q, I } = UI;
+      const n = DB.get(q.get("n"));
+      const c = Math.max(1, parseInt(q.get("c") || "1", 10));
+      if (!n || c > n.chapters) { $("#content").innerHTML = `<div class="empty">${I.search}<div>Chapter not found.</div></div>`; return; }
+      const title = DB.chapterTitle(n, c);
+      document.title = `${n.title} - ${title} | Free Web Novel`;
+      Lib.mark(n.id, c);
+
+      $(".reader-top a[title=Home]").innerHTML = I.home;
+      $("#rtTitle").innerHTML = `<a href="novel.html?n=${n.slug}">${esc(n.title)}</a> <span style="color:var(--muted)">/ ${esc(title)}</span>`;
+      const libBtn = $("#rtLib");
+      const setLib = () => libBtn.innerHTML = `${I.heart} ${Lib.has(n.id) ? "In Library" : "Add to Library"}`;
+      setLib();
+      libBtn.addEventListener("click", e => { e.preventDefault(); const a = Lib.toggle(n.id); setLib(); toast(a ? "Added to your library" : "Removed from library"); });
+
+      // nav
+      const link = (cc) => `read.html?n=${n.slug}&c=${cc}`;
+      function nav() {
+        const sel = `<select onchange="location.href=this.value">${Array.from({ length: Math.min(n.chapters, 400) }, (_, i) => {
+          // window around current chapter if too many chapters
+          const start = Math.max(1, Math.min(c - 200, n.chapters - 399)); const cc = start + i; if (cc > n.chapters) return "";
+          return `<option value="${link(cc)}" ${cc === c ? "selected" : ""}>${esc(DB.chapterTitle(n, cc))}</option>`; }).join("")}</select>`;
+        return `<a class="btn alt ${c <= 1 ? "disabled" : ""}" href="${link(c - 1)}">${I.left} Prev</a>
+          <a class="btn ghost" href="novel.html?n=${n.slug}">${I.list} Index</a>
+          ${sel}
+          <a class="btn ${c >= n.chapters ? "disabled" : ""}" href="${link(c + 1)}">Next ${I.right}</a>`;
+      }
+      $("#navTop").innerHTML = nav(); $("#navBottom").innerHTML = nav();
+
+      // content
+      $("#content").innerHTML = `<h1>${esc(title)}</h1><div class="sub">${esc(n.title)} &middot; ${DB.chapterDate(n, c)} &middot; ${DB.chapterBody(n, c).join(" ").split(" ").length} words</div>` + DB.chapterBody(n, c).map(p => `<p>${esc(p)}</p>`).join("");
+
+      // settings
+      const prefs = Object.assign({ theme: "paper", size: 18, font: "serif", lh: 1.8 }, JSON.parse(localStorage.getItem("fwn_reader") || "{}"));
+      function apply() {
+        document.body.className = `reader-page theme-${prefs.theme}`;
+        document.documentElement.style.setProperty("--read-size", prefs.size + "px");
+        document.documentElement.style.setProperty("--read-lh", prefs.lh);
+        document.documentElement.style.setProperty("--read-font", prefs.font === "serif" ? 'Georgia, "Times New Roman", serif' : '"Roboto", "Segoe UI", Arial, sans-serif');
+        $("#sizeLabel").textContent = prefs.size + "px";
+        $$("[data-theme]").forEach(b => b.querySelector(".sw").classList.toggle("active", b.dataset.theme === prefs.theme));
+        $$("[data-font]").forEach(b => b.classList.toggle("active", b.dataset.font === prefs.font));
+        $$("[data-lh]").forEach(b => b.classList.toggle("active", +b.dataset.lh === +prefs.lh));
+        localStorage.setItem("fwn_reader", JSON.stringify(prefs));
+      }
+      $("#settings").addEventListener("click", e => {
+        const b = e.target.closest("button"); if (!b) return;
+        if (b.dataset.theme) prefs.theme = b.dataset.theme;
+        if (b.dataset.size) prefs.size = Math.max(14, Math.min(28, prefs.size + +b.dataset.size));
+        if (b.dataset.font) prefs.font = b.dataset.font;
+        if (b.dataset.lh) prefs.lh = +b.dataset.lh;
+        apply();
+      });
+      apply();
+
+      // keyboard nav
+      document.addEventListener("keydown", e => {
+        if (e.target.tagName === "TEXTAREA" || e.target.tagName === "INPUT") return;
+        if (e.key === "ArrowLeft" && c > 1) location.href = link(c - 1);
+        if (e.key === "ArrowRight" && c < n.chapters) location.href = link(c + 1);
+      });
+
+      // comments (local demo)
+      const key = `fwn_comments_${n.id}_${c}`;
+      const colors = ["#e67e22", "#1e73be", "#2e9e4f", "#7e57c2", "#e53935"];
+      function renderComments() {
+        const list = JSON.parse(localStorage.getItem(key) || "[]");
+        $("#comments").innerHTML = list.length ? list.map((cm, i) => `<div class="comment"><div class="avatar" style="background:${colors[i % colors.length]}">${esc(cm.who[0])}</div><div><div class="who">${esc(cm.who)}<small>${DB.timeAgo(Math.round((Date.now() - cm.at) / 6e4))}</small></div><p>${esc(cm.text)}</p></div></div>`).join("") : `<p style="color:var(--muted);font-size:12px;margin-top:10px">No comments yet. Be the first!</p>`;
+      }
+      $("#cPost").addEventListener("click", () => {
+        const u = Auth.user(); if (!u) { openLogin(); return; }
+        const t = $("#cText").value.trim(); if (!t) return;
+        const list = JSON.parse(localStorage.getItem(key) || "[]"); list.unshift({ who: u.name, text: t, at: Date.now() });
+        localStorage.setItem(key, JSON.stringify(list)); $("#cText").value = ""; renderComments(); toast("Comment posted (demo)");
+      });
+      renderComments();
+    });
+  </script>
+</body>
+</html>
