@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Read Novels Online For Free - Free Web Novel</title>
+  <title>Novelxplin - Read Web Novels Online</title>
   <meta name="description" content="Read Novels Online & Discover Free Stories. Latest release novels, completed novels and all genres.">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Roboto+Condensed:wght@400;700&display=swap" rel="stylesheet">
@@ -61,6 +61,10 @@
 
   <div id="siteFooter"></div>
 
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+  <script src="js/config.js"></script>
   <script src="js/data.js"></script>
   <script src="js/app.js"></script>
   <script>
@@ -69,10 +73,12 @@
 
       // Featured block: 1 big + 6 small
       const feat = DB.featured();
-      const big = feat[0];
+      if (!feat.length) { $("#featured").innerHTML = `<div class="panel" style="grid-column:1/-1"><div class="empty">${I.book}<div>No novels yet.${Auth.isAdmin() ? ' <a href="admin.html" style="color:var(--link)">Upload your first novel</a>.' : ' Check back soon!'}</div></div></div>`; }
+      const big = feat[0] || { color: "#334155", glyph: "📜", slug: "", title: "", rating: 0, genres: [], lang: "", chapters: 0 };
       const bigHtml = `<div class="panel big">
-        <div class="cover" style="background:${big.color}">
-          <a href="novel.html?n=${big.slug}" style="position:absolute;inset:0" aria-label="${esc(big.title)}"></a>
+        <div class="cover${big.cover ? " has-img" : ""}" style="background:${big.color}">
+          ${big.cover ? `<img src="${esc(big.cover)}" alt="">` : ""}
+          <a href="novel.html?n=${big.slug}" style="position:absolute;inset:0;z-index:1" aria-label="${esc(big.title)}"></a>
           <span class="glyph">${big.glyph}</span>
           <div class="big-info">
             <h3><a href="novel.html?n=${big.slug}">${esc(big.title)}</a></h3>
@@ -81,7 +87,7 @@
           </div>
         </div></div>`;
       const small = feat.slice(1).map(n => `<div class="panel f-card">${cover(n)}<div><h3 class="truncate"><a href="novel.html?n=${n.slug}">${esc(n.title)}</a></h3>${stars(n.rating)}${metaLines(n)}</div></div>`).join("");
-      $("#featured").innerHTML = bigHtml + small;
+      if (feat.length) $("#featured").innerHTML = bigHtml + small;
 
       // Latest release
       $("#lrTitle").innerHTML = `${I.refresh} Latest Release Novels`;
@@ -107,7 +113,7 @@
       $("#hTitle").innerHTML = `${I.clock} Continue Reading`;
       const hist = Object.entries(Lib.history()).sort((a, b) => b[1].at - a[1].at).slice(0, 6);
       $("#history").innerHTML = hist.length
-        ? `<ul class="lib-list">${hist.map(([id, h]) => { const n = DB.get(+id); if (!n) return ""; return `<li>${cover(n)}<div><div class="t truncate"><a href="novel.html?n=${n.slug}">${esc(n.title)}</a></div><div class="s">Last read: <a href="read.html?n=${n.slug}&c=${h.chap}">Chapter ${h.chap}</a></div></div><a class="rm" href="read.html?n=${n.slug}&c=${h.chap}">${I.right}</a></li>`; }).join("")}</ul>`
+        ? `<ul class="lib-list">${hist.map(([id, h]) => { const n = DB.get(id); if (!n) return ""; return `<li>${cover(n)}<div><div class="t truncate"><a href="novel.html?n=${n.slug}">${esc(n.title)}</a></div><div class="s">Last read: <a href="read.html?n=${n.slug}&c=${h.chap}">Chapter ${h.chap}</a></div></div><a class="rm" href="read.html?n=${n.slug}&c=${h.chap}">${I.right}</a></li>`; }).join("")}</ul>`
         : `<div class="empty">${I.book}<div>No reading history yet.<br>Start a novel and it will show up here.</div></div>`;
     });
   </script>

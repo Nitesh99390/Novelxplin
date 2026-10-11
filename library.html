@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Your Library - Free Web Novel</title>
+  <title>Your Library - Novelxplin</title>
   <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Roboto+Condensed:wght@400;700&display=swap" rel="stylesheet">
   <link rel="icon" type="image/svg+xml" href="img/favicon.svg">
   <link rel="stylesheet" href="css/style.css">
@@ -34,6 +34,10 @@
     </div>
   </main>
   <div id="siteFooter"></div>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+  <script src="js/config.js"></script>
   <script src="js/data.js"></script>
   <script src="js/app.js"></script>
   <script>
@@ -47,7 +51,7 @@
 
       const u = Auth.user();
       $("#acct").innerHTML = u ? `${esc(u.name)} &middot; <a href="#" id="logout" style="color:var(--link)">Logout</a>` : `<a href="#" id="loginLink" style="color:var(--link)">Login to sync</a>`;
-      $("#logout")?.addEventListener("click", e => { e.preventDefault(); Auth.logout(); location.reload(); });
+      $("#logout")?.addEventListener("click", async e => { e.preventDefault(); await Auth.logout(); location.reload(); });
       $("#loginLink")?.addEventListener("click", e => { e.preventDefault(); openLogin(); });
 
       function renderLib() {
@@ -58,16 +62,16 @@
             <div class="s">${h ? `Read: <a href="read.html?n=${n.slug}&c=${h.chap}">Chapter ${h.chap}</a> / ` : ""}Latest: <a href="read.html?n=${n.slug}&c=${n.chapters}">Chapter ${n.chapters}</a> &middot; ${DB.timeAgo(n.updatedMinutesAgo)}</div></div>
             <button class="rm" data-rm="${id}">Remove</button></li>`; }).join("")}</ul>`
           : `<div class="empty">${I.shelf}<div>Your library is empty.<br><a href="list.html?sort=most-popular" style="color:var(--link)">Browse popular novels</a> and add some.</div></div>`;
-        $$("[data-rm]").forEach(b => b.addEventListener("click", () => { Lib.toggle(+b.dataset.rm); renderLib(); toast("Removed from library"); }));
+        $$("[data-rm]").forEach(b => b.addEventListener("click", () => { Lib.toggle(b.dataset.rm); renderLib(); toast("Removed from library"); }));
       }
       const $$ = UI.$$;
       function renderHist() {
         const h = Object.entries(Lib.history()).sort((a, b) => b[1].at - a[1].at);
-        $("#hist").innerHTML = h.length ? `<ul class="lib-list">${h.map(([id, v]) => { const n = DB.get(+id); if (!n) return "";
-          return `<li>${cover(n)}<div><div class="t truncate"><a href="novel.html?n=${n.slug}">${esc(n.title)}</a></div><div class="s">${esc(DB.chapterTitle(n, v.chap))} &middot; ${DB.timeAgo(Math.round((Date.now() - v.at) / 6e4))}</div></div><a class="rm" href="read.html?n=${n.slug}&c=${v.chap}" style="color:var(--link)">Continue</a></li>`; }).join("")}</ul>`
+        $("#hist").innerHTML = h.length ? `<ul class="lib-list">${h.map(([id, v]) => { const n = DB.get(id); if (!n) return "";
+          return `<li>${cover(n)}<div><div class="t truncate"><a href="novel.html?n=${n.slug}">${esc(n.title)}</a></div><div class="s">Chapter ${v.chap} &middot; ${DB.timeAgo(Math.round((Date.now() - v.at) / 6e4))}</div></div><a class="rm" href="read.html?n=${n.slug}&c=${v.chap}" style="color:var(--link)">Continue</a></li>`; }).join("")}</ul>`
           : `<div class="empty">${I.clock}<div>No reading history yet.</div></div>`;
       }
-      $("#clearHist").addEventListener("click", e => { e.preventDefault(); localStorage.removeItem("fwn_history"); renderHist(); toast("History cleared"); });
+      $("#clearHist").addEventListener("click", e => { e.preventDefault(); Lib.clearHistory(); renderHist(); toast("History cleared"); });
       renderLib(); renderHist();
     });
   </script>

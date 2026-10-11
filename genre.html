@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Genre - Free Web Novel</title>
+  <title>Genre - Novelxplin</title>
   <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Roboto+Condensed:wght@400;700&display=swap" rel="stylesheet">
   <link rel="icon" type="image/svg+xml" href="img/favicon.svg">
   <link rel="stylesheet" href="css/style.css">
@@ -36,6 +36,10 @@
     </div>
   </main>
   <div id="siteFooter"></div>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+  <script src="js/config.js"></script>
   <script src="js/data.js"></script>
   <script src="js/app.js"></script>
   <script>
@@ -52,11 +56,11 @@
       if (query !== null) {
         list = DB.search(query);
         title = `Search results for "${query}"`; crumbLabel = "Search"; base = `search.html?q=${encodeURIComponent(query)}`;
-        document.title = `Search: ${query} - Free Web Novel`;
+        document.title = `Search: ${query} - Novelxplin`;
       } else if (genre) {
         list = DB.byGenre(genre);
         title = `${genre} Novels`; crumbLabel = genre; base = `genre.html?g=${encodeURIComponent(genre)}`;
-        document.title = `${genre} Novels - Free Web Novel`;
+        document.title = `${genre} Novels - Novelxplin`;
       } else {
         const map = {
           "latest-novel": ["Latest Novels", DB.latestNovels()],
@@ -66,7 +70,7 @@
         };
         const m = map[sort] || map["latest-novel"];
         title = m[0]; list = m[1]; crumbLabel = m[0]; base = `list.html?sort=${sort}`;
-        document.title = `${m[0]} - Free Web Novel`;
+        document.title = `${m[0]} - Novelxplin`;
       }
       if (status !== "all") list = list.filter(n => n.status.toLowerCase() === status);
 

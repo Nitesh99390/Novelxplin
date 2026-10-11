@@ -1,5 +1,5 @@
-ref/
-server.log
-nohup.out
-*.pid
+node_modules/
+data/
+backups/
+*.log
 .DS_Store
