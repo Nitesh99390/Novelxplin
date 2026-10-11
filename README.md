@@ -21,7 +21,7 @@ Admin = any Google account listed in `js/config.js → ADMIN_EMAILS`
 | `novel.html?n=<slug>` | Novel detail + chapter list (50/page, search) |
 | `read.html?n=<slug>&c=<n>` | Reader – themes, font, size, keyboard nav, comments (Firestore) |
 | `library.html` | Library + history (localStorage, synced to Firestore when signed in) |
-| `admin.html` | **Admin only** – create/edit/delete novels, cover upload, bulk `.txt` chapter upload, backup |
+| `admin.html` | **Admin only** – create/edit/delete novels, cover upload, `.epub` chapter upload, backup |
 
 ## 1. Firebase setup (5 min)
 
@@ -59,9 +59,11 @@ Memory footprint ≈ 50 MB RSS; chapters are streamed from disk, so 47 GB storag
 
 1. Sign in with the admin Google account → click **Admin** in the header.
 2. **New novel** → title, author, genres, summary, cover (upload or URL) → *Create novel*.
-3. **Bulk upload chapters**: drop `.txt` files.
-   * One file per chapter: `chapter-1.txt`, `chapter-2.txt` … (number taken from filename; first line used as title if it looks like `Chapter 1: …`).
-   * One big file: auto-split on lines like `Chapter 12: Title`, `Ch. 12`, `第12章`.
+3. **Upload EPUB**: drop an `.epub` file (parsed in the browser with JSZip – nothing extra on the server).
+   * Every spine item becomes a chapter; cover / TOC / copyright / Gutenberg boilerplate pages are skipped.
+   * Title comes from the chapter's `<h1>`–`<h4>`, else the EPUB table of contents.
+   * Chapter numbers are taken from headings like `Chapter 12: Title`, `Ch. 12`, `第12章` when every chapter has one; otherwise they continue from the novel's last chapter.
+   * Existing chapter numbers prompt once for overwrite. Multiple `.epub` files can be dropped together (uploaded in filename order).
 4. Or add/edit a single chapter manually. Delete / edit from the list.
 5. **Download full backup** → one `.json.gz` with every novel + chapter.
 

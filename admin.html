@@ -97,9 +97,9 @@
             <div class="panel-head"><h2 id="cTitle"></h2><span class="more" id="cCount" style="color:var(--muted)"></span></div>
             <div class="adm-form">
               <div class="drop" id="drop">
-                <b>Bulk upload chapters</b><br>Drop <code>.txt</code> files here or click to pick (one chapter per file, or one big file).<br>
-                <span class="hint">Big file is auto-split on lines like “Chapter 12: Title” / “第12章”. Filenames like <code>chapter-12.txt</code> set the number.</span>
-                <input type="file" id="chapFiles" multiple accept=".txt,.md,text/plain" style="display:none">
+                <b>Upload EPUB</b><br>Drop an <code>.epub</code> file here or click to pick. Every chapter inside the book is extracted automatically.<br>
+                <span class="hint">Chapter numbers are read from headings like “Chapter 12: Title” / “第12章”; otherwise they continue from the last chapter. Cover / TOC / copyright pages are skipped.</span>
+                <input type="file" id="chapFiles" multiple accept=".epub,application/epub+zip" style="display:none">
                 <div class="prog" id="prog"><i></i></div>
               </div>
               <details>
@@ -138,6 +138,7 @@
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
   <script src="js/config.js"></script>
   <script src="js/data.js"></script>
   <script src="js/app.js"></script>
@@ -240,40 +241,106 @@
       drop.addEventListener("drop", e => handleFiles([...e.dataTransfer.files]));
       fileIn.addEventListener("change", e => handleFiles([...e.target.files]));
 
+      // ---- EPUB parsing (client side, via JSZip) ----
       const CH_RE = /^\s*(?:chapter|ch\.?|第)\s*(\d+)\s*(?:章|话|話)?\s*[:：\-–—.]?\s*(.*)$/i;
-      function splitBig(text) {
-        const lines = text.replace(/\r/g, "").split("\n"); const out = []; let curC = null;
-        for (const ln of lines) {
-          const m = CH_RE.exec(ln);
-          if (m && ln.trim().length < 120) { if (curC) out.push(curC); curC = { num: +m[1], title: ln.trim(), body: [] }; }
-          else if (curC) curC.body.push(ln);
-        }
-        if (curC) out.push(curC);
-        return out.map(c => ({ ...c, body: c.body.join("\n") })).filter(c => c.body.trim());
+      const SKIP_RE = /^(cover|title ?page|copyright|contents|table of contents|toc|dedication|acknowledg(e)?ments|about the author|colophon|imprint|epigraph|also by|preface|foreword|front ?matter|back ?matter|landmarks|guide)$/i;
+      const SKIP_FILE_RE = /(^|\/)(cover|titlepage|title_page|toc|nav|copyright|contents|colophon|frontmatter|backmatter)[^\/]*\.x?html?$/i;
+      const dirOf = p => p.includes("/") ? p.slice(0, p.lastIndexOf("/") + 1) : "";
+      const normPath = p => { const out = []; for (const seg of p.split("/")) { if (seg === "..") out.pop(); else if (seg && seg !== ".") out.push(seg); } return out.join("/"); };
+      const xmlDoc = (s, type) => new DOMParser().parseFromString(s, type || "application/xml");
+
+      // Convert an XHTML chapter document into plain text (one paragraph per line, blank line between)
+      function htmlToText(doc) {
+        const root = doc.body || doc.documentElement;
+        root.querySelectorAll("script,style,nav,svg,img,figure,header .pagenum,.pagenum,[epub\\:type=pagebreak],[role=doc-pagebreak]").forEach(n => n.remove());
+        const BLOCK = new Set(["P","DIV","H1","H2","H3","H4","H5","H6","LI","BLOCKQUOTE","PRE","SECTION","ARTICLE","TR","HR","BR","DT","DD","UL","OL","TABLE","ASIDE","FIGCAPTION"]);
+        let out = "";
+        const walk = n => {
+          if (n.nodeType === 3) { out += n.nodeValue.replace(/\s+/g, " "); return; }
+          if (n.nodeType !== 1) return;
+          const tag = n.tagName.toUpperCase(); const blk = BLOCK.has(tag);
+          if (blk) out += "\n";
+          if (tag === "BR" || tag === "HR") { out += "\n"; return; }
+          for (const c of n.childNodes) walk(c);
+          if (blk) out += "\n";
+        };
+        walk(root);
+        return out.split("\n").map(l => l.trim()).filter(Boolean).join("\n\n");
       }
+
+      async function parseEpub(file) {
+        if (!window.JSZip) throw new Error("JSZip failed to load – check internet connection");
+        const zip = await JSZip.loadAsync(file);
+        const read = async p => { const f = zip.file(p) || zip.file(decodeURIComponent(p)); if (!f) throw new Error("Missing file in EPUB: " + p); return f.async("string"); };
+        // 1. container.xml → OPF path
+        const container = xmlDoc(await read("META-INF/container.xml"));
+        const opfPath = container.querySelector("rootfile")?.getAttribute("full-path");
+        if (!opfPath) throw new Error("Invalid EPUB: no rootfile");
+        const opfDir = dirOf(opfPath);
+        const opf = xmlDoc(await read(opfPath));
+        const meta = { title: opf.getElementsByTagName("dc:title")[0]?.textContent?.trim() || opf.querySelector("title")?.textContent?.trim() || "", author: opf.getElementsByTagName("dc:creator")[0]?.textContent?.trim() || "" };
+        // 2. manifest + spine (reading order)
+        const manifest = {}; opf.querySelectorAll("manifest > item").forEach(it => manifest[it.getAttribute("id")] = { href: it.getAttribute("href"), type: it.getAttribute("media-type") || "", props: it.getAttribute("properties") || "" });
+        const spine = [...opf.querySelectorAll("spine > itemref")].filter(r => r.getAttribute("linear") !== "no").map(r => manifest[r.getAttribute("idref")]).filter(m => m && /html|xml/i.test(m.type) && !/nav/.test(m.props));
+        if (!spine.length) throw new Error("EPUB has no readable content");
+        // 3. TOC titles (EPUB3 nav or EPUB2 NCX) keyed by file path
+        const tocTitles = {};
+        try {
+          const navItem = Object.values(manifest).find(m => /nav/.test(m.props));
+          const ncxId = opf.querySelector("spine")?.getAttribute("toc"); const ncxItem = ncxId && manifest[ncxId] || Object.values(manifest).find(m => /ncx/i.test(m.type));
+          if (navItem) { const nav = xmlDoc(await read(normPath(opfDir + navItem.href)), "application/xhtml+xml"); nav.querySelectorAll("nav a[href]").forEach(a => { const p = normPath(dirOf(normPath(opfDir + navItem.href)) + a.getAttribute("href").split("#")[0]); if (!tocTitles[p]) tocTitles[p] = a.textContent.trim(); }); }
+          else if (ncxItem) { const ncx = xmlDoc(await read(normPath(opfDir + ncxItem.href))); ncx.querySelectorAll("navPoint").forEach(np => { const src = np.querySelector("content")?.getAttribute("src"); const lbl = np.querySelector("navLabel text, text")?.textContent?.trim(); if (src && lbl) { const p = normPath(dirOf(normPath(opfDir + ncxItem.href)) + src.split("#")[0]); if (!tocTitles[p]) tocTitles[p] = lbl; } }); }
+        } catch (e) { console.warn("TOC parse failed", e); }
+        // 4. walk spine → chapters
+        const chapters = [];
+        for (const item of spine) {
+          const path = normPath(opfDir + item.href);
+          if (SKIP_FILE_RE.test(path)) continue;
+          let html; try { html = await read(path); } catch { continue; }
+          let doc = xmlDoc(html, "application/xhtml+xml");
+          if (doc.querySelector("parsererror") || !doc.body) doc = xmlDoc(html, "text/html");
+          const heading = doc.querySelector("h1,h2,h3,h4,.chapter-title,.title")?.textContent?.replace(/\s+/g, " ").trim() || "";
+          let title = heading || tocTitles[path] || doc.querySelector("title")?.textContent?.trim() || "";
+          if (SKIP_RE.test(title) || /^the project gutenberg/i.test(title)) continue;
+          let text = htmlToText(doc);
+          // strip the heading line if it is the first line of body
+          if (title && text.toLowerCase().startsWith(title.toLowerCase())) text = text.slice(title.length).replace(/^\s+/, "");
+          if (text.replace(/\s/g, "").length < 200) continue; // too short → not a real chapter (cover, blank, ads…)
+          const m = CH_RE.exec(title) || CH_RE.exec(text.split("\n")[0]);
+          chapters.push({ num: m ? +m[1] : null, title, body: text });
+        }
+        return { meta, chapters };
+      }
+
       async function handleFiles(files) {
-        files = files.filter(f => /\.(txt|md)$/i.test(f.name) || f.type.startsWith("text/"));
-        if (!files.length) return toast("Only .txt files");
+        files = files.filter(f => /\.epub$/i.test(f.name) || f.type === "application/epub+zip");
+        if (!files.length) return toast("Only .epub files are accepted");
+        if (!cur) return toast("Select a novel first");
         files.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
-        prog.style.display = ""; const bar = prog.firstElementChild; let done = 0, total = 0;
+        prog.style.display = ""; const bar = prog.firstElementChild; let total = 0;
         const existing = new Set(chaps.map(c => c.num)); let next = chaps.length ? chaps[chaps.length - 1].num + 1 : 1;
-        let batch = [];
+        let batch = []; let overwriteAll = null;
         const flush = async () => { if (!batch.length) return; const r = await call("POST", `/api/novels/${cur.slug}/chapters`, { chapters: batch }); total += r.saved.length; batch = []; };
         try {
           for (const f of files) {
-            const text = await f.text();
-            let items = text.length > 20000 || (text.match(CH_RE) && splitBig(text).length > 1) ? splitBig(text) : [];
-            if (!items.length) {
-              const m = /(\d+)/.exec(f.name); const lines = text.replace(/\r/g, "").split("\n"); const first = lines.find(l => l.trim()) || "";
-              const isTitle = CH_RE.test(first) && first.trim().length < 120;
-              const num = m ? +m[1] : next++; if (!m) next = Math.max(next, num + 1);
-              items = [{ num, title: isTitle ? first.trim() : `Chapter ${num}`, body: isTitle ? lines.slice(lines.indexOf(first) + 1).join("\n") : text }];
+            toast(`Reading ${f.name}…`); bar.style.width = "5%";
+            const { chapters } = await parseEpub(f);
+            if (!chapters.length) { toast(`No chapters found in ${f.name}`); continue; }
+            // assign numbers: use detected numbers when they form a sane sequence, else sequential
+            // use heading numbers only when every section has one and they are unique – otherwise number sequentially
+            const useDetected = chapters.every(c => c.num !== null) && new Set(chapters.map(c => c.num)).size === chapters.length;
+            chapters.forEach(c => { if (!useDetected || c.num === null) { c.num = next++; } else next = Math.max(next, c.num + 1); if (!c.title) c.title = `Chapter ${c.num}`; });
+            if (!confirm(`Found ${chapters.length} chapter(s) in "${f.name}" (${chapters[0].num} → ${chapters[chapters.length - 1].num}). Upload to "${cur.title}"?`)) continue;
+            let i = 0;
+            for (const it of chapters) {
+              if (existing.has(it.num)) { if (overwriteAll === null) overwriteAll = confirm(`Some chapters already exist (e.g. #${it.num}). Overwrite existing chapters?`); if (!overwriteAll) { i++; continue; } }
+              batch.push(it); if (batch.length >= 25) await flush();
+              i++; bar.style.width = Math.round(5 + i / chapters.length * 95) + "%";
             }
-            for (const it of items) { if (existing.has(it.num) && !confirm(`Chapter ${it.num} already exists. Overwrite?`)) continue; batch.push(it); if (batch.length >= 25) await flush(); }
-            done++; bar.style.width = Math.round(done / files.length * 100) + "%";
+            await flush();
           }
-          await flush(); toast(`Uploaded ${total} chapter(s)`);
-        } catch (err) { toast("Upload failed: " + err.message); }
+          toast(`Uploaded ${total} chapter(s)`);
+        } catch (err) { console.error(err); toast("Upload failed: " + err.message); }
         prog.style.display = "none"; bar.style.width = "0"; fileIn.value = ""; loadChapters();
       }
 
