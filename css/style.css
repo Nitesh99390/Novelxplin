@@ -26,7 +26,9 @@
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
-html { -webkit-text-size-adjust: 100%; }
+/* overflow-x clip on <html> too: if any element ever grows past the viewport the
+   browser must NOT zoom the layout out (which made the header look cut off on phones) */
+html { -webkit-text-size-adjust: 100%; overflow-x: clip; max-width: 100vw; }
 body {
   font-family: var(--font);
   font-size: 13px;
@@ -36,8 +38,12 @@ body {
   min-height: 100vh;
   display: flex;
   flex-direction: column;
-  overflow-x: hidden; /* never allow horizontal page scroll */
+  width: 100%;
+  max-width: 100vw;
+  overflow-x: clip; /* never allow horizontal page scroll */
 }
+/* full-width bars must always span the whole screen, regardless of content width */
+.header, .notice, .reader-top, .footer, .mobile-nav, .mobile-search { width: 100%; max-width: 100vw; }
 a { color: inherit; text-decoration: none; }
 a:hover { color: var(--accent); }
 ul { list-style: none; }
@@ -103,7 +109,8 @@ button { cursor: pointer; border: 0; background: none; }
 /* ----------------------------- Notice bar ----------------------------- */
 .notice { background: #fff; border-bottom: 1px solid var(--border); }
 .notice .wrap { display: flex; align-items: center; gap: 8px; height: 30px; font-size: 12px; color: #334; font-weight: 500; }
-.notice .icon { color: #556; font-size: 14px; }
+.notice .icon { color: #556; font-size: 14px; flex-shrink: 0; }
+.notice .wrap span { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* ----------------------------- Layout ----------------------------- */
 .page { flex: 1; padding: 14px 0 24px; }
@@ -280,9 +287,11 @@ body.reader-page.theme-light { background: #ffffff; }
 .reader-top .novel-title { font-weight: 700; flex: 1 1 0; min-width: 0; }
 .reader-wrap { min-width: 0; }
 .reader-top .novel-title a { color: var(--link); }
+.reader-top .novel-title > * { display: inline; }
+.reader-top .novel-title span { white-space: nowrap; }
 .reader-wrap { width: 100%; max-width: 860px; margin: 0 auto; padding: 16px 12px 40px; }
-.reader-nav { display: flex; gap: 6px; justify-content: center; align-items: center; margin: 10px 0; flex-wrap: wrap; }
-.reader-nav .btn { height: 36px; }
+.reader-nav { display: flex; gap: 6px; justify-content: center; align-items: center; margin: 10px 0; flex-wrap: wrap; min-width: 0; }
+.reader-nav .btn { height: 36px; white-space: nowrap; }
 .reader-nav select { height: 36px; min-width: 0; max-width: min(320px, 100%); border: 1px solid var(--border); border-radius: 3px; padding: 0 8px; background: #fff; text-overflow: ellipsis; }
 .theme-dark .reader-nav select { background: #2a2a2a; color: #ddd; border-color: #444; }
 .reader-nav .btn.disabled { opacity: .45; pointer-events: none; }
@@ -398,8 +407,11 @@ body.reader-page.theme-light { background: #ffffff; }
   .novel-head .cover { width: 160px; max-width: 100%; margin: 0 auto; }
   .novel-head .info-row { grid-template-columns: 90px minmax(0, 1fr); }
   .btn-row .btn { flex: 1 1 auto; justify-content: center; }
-  .reader-nav .btn { flex: 0 0 auto; }
-  .reader-nav select { flex: 1 1 100%; width: 100%; max-width: 100%; }
+  /* Reader nav on phones: one row  [ Prev | Index | Next ]  + full-width chapter dropdown below */
+  .reader-nav { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 12px 0; }
+  .reader-nav .btn { width: 100%; height: 42px; padding: 0 8px; justify-content: center; font-size: 14px; }
+  .reader-nav select { grid-column: 1 / -1; order: 1; width: 100%; max-width: 100%; height: 42px; font-size: 14px; }
+  .reader-top .btn { height: 32px; padding: 0 10px; font-size: 12px; white-space: nowrap; flex-shrink: 0; }
   .reader-settings { min-width: 0; }
   .chapter-content { padding: 18px 16px; }
   .chapter-tools { display: none; }
