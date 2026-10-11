@@ -1,0 +1,12 @@
+{
+  "name": "novelxplin",
+  "version": "1.0.0",
+  "description": "Novelxplin – web novel reading site. Static frontend + zero-dependency Node backend (Oracle VM) + Firebase auth/sync.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "PORT=3000 ADMIN_DEV_TOKEN=dev node server.js"
+  },
+  "engines": { "node": ">=18" },
+  "license": "MIT"
+}

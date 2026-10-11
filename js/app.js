@@ -36,22 +36,64 @@
   };
   window.ICONS = I;
 
-  /* ---------- LocalStorage helpers ---------- */
+  /* ---------- Storage: localStorage cache + Firebase (Auth + Firestore) sync ---------- */
+  const CFG = window.NX_CONFIG || {};
   const store = {
     get(k, d) { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } },
     set(k, v) { localStorage.setItem(k, JSON.stringify(v)); }
   };
+  const fbReady = !!(window.firebase && CFG.FIREBASE && CFG.FIREBASE.apiKey && !/^PASTE_/.test(CFG.FIREBASE.apiKey));
+  let fbAuth = null, fbDb = null, curUser = null;
+  if (fbReady) {
+    try { firebase.initializeApp(CFG.FIREBASE); fbAuth = firebase.auth(); fbDb = firebase.firestore(); }
+    catch (e) { console.warn("Firebase init failed", e); }
+  }
+  const isAdminEmail = em => !!em && (CFG.ADMIN_EMAILS || []).map(x => x.toLowerCase()).includes(String(em).toLowerCase());
+  const userDoc = () => (fbDb && curUser) ? fbDb.collection("users").doc(curUser.uid) : null;
+  // write-through: update localStorage immediately, push to Firestore in background
+  function pushCloud(patch) { const d = userDoc(); if (d) d.set(patch, { merge: true }).catch(e => console.warn("sync", e.message)); }
+
   const Lib = {
-    list() { return store.get("fwn_library", []); },
+    list() { return store.get("nx_library", []); },
     has(id) { return this.list().includes(id); },
-    toggle(id) { const l = this.list(); const i = l.indexOf(id); i >= 0 ? l.splice(i, 1) : l.unshift(id); store.set("fwn_library", l); return i < 0; },
-    history() { return store.get("fwn_history", {}); },
-    mark(id, chap) { const h = this.history(); h[id] = { chap, at: Date.now() }; store.set("fwn_history", h); }
+    toggle(id) { const l = this.list(); const i = l.indexOf(id); i >= 0 ? l.splice(i, 1) : l.unshift(id); store.set("nx_library", l); pushCloud({ library: l }); return i < 0; },
+    history() { return store.get("nx_history", {}); },
+    mark(id, chap) { const h = this.history(); h[id] = { chap, at: Date.now() }; store.set("nx_history", h); pushCloud({ history: h }); },
+    clearHistory() { store.set("nx_history", {}); pushCloud({ history: {} }); },
+    async pull() { // merge cloud → local on login
+      const d = userDoc(); if (!d) return;
+      try {
+        const snap = await d.get(); const c = snap.exists ? snap.data() : {};
+        const lib = [...new Set([...(c.library || []), ...this.list()])];
+        const hist = Object.assign({}, c.history || {}, this.history());
+        for (const k in (c.history || {})) if (hist[k] && c.history[k].at > hist[k].at) hist[k] = c.history[k];
+        store.set("nx_library", lib); store.set("nx_history", hist);
+        d.set({ library: lib, history: hist, email: curUser.email, name: curUser.displayName || "", photo: curUser.photoURL || "", admin: isAdminEmail(curUser.email), lastSeen: Date.now() }, { merge: true });
+      } catch (e) { console.warn("pull", e.message); }
+    }
   };
   const Auth = {
-    user() { return store.get("fwn_user", null); },
-    login() { const u = { name: "Reader", email: "reader@example.com" }; store.set("fwn_user", u); return u; },
-    logout() { localStorage.removeItem("fwn_user"); }
+    enabled: !!fbAuth,
+    user() { return store.get("nx_user", null); },
+    isAdmin() { const u = this.user(); return !!u && isAdminEmail(u.email); },
+    async token() { return fbAuth && fbAuth.currentUser ? fbAuth.currentUser.getIdToken() : null; },
+    async login() {
+      if (!fbAuth) { toast("Firebase config missing – set js/config.js"); return null; }
+      const prov = new firebase.auth.GoogleAuthProvider();
+      try { await fbAuth.signInWithPopup(prov); } catch (e) { if (e.code === "auth/popup-blocked" || e.code === "auth/operation-not-supported-in-this-environment") await fbAuth.signInWithRedirect(prov); else { toast(e.message); throw e; } }
+    },
+    async logout() { localStorage.removeItem("nx_user"); if (fbAuth) await fbAuth.signOut(); },
+    // resolves once initial auth state is known
+    ready: new Promise(res => {
+      if (!fbAuth) return res(null);
+      const off = fbAuth.onAuthStateChanged(async u => {
+        curUser = u;
+        if (u) { store.set("nx_user", { uid: u.uid, name: u.displayName || u.email.split("@")[0], email: u.email, photo: u.photoURL || "", admin: isAdminEmail(u.email) }); await Lib.pull(); }
+        else localStorage.removeItem("nx_user");
+        res(u); off && typeof off === "function" && 0; // keep listening for later changes
+        document.dispatchEvent(new CustomEvent("auth:change", { detail: u }));
+      });
+    })
   };
   window.Lib = Lib; window.Auth = Auth;
 
@@ -69,12 +111,12 @@
   function header() {
     const user = Auth.user();
     const userHtml = user
-      ? `<a class="login-btn user-pill" href="library.html" title="${esc(user.email)}"><span class="avatar">${esc(user.name[0])}</span>${esc(user.name)}</a>`
+      ? `<a class="login-btn user-pill" href="library.html" title="${esc(user.email)}">${user.photo ? `<img class="avatar" src="${esc(user.photo)}" alt="" referrerpolicy="no-referrer">` : `<span class="avatar">${esc(user.name[0])}</span>`}${esc(user.name)}</a>${user.admin ? `<a class="login-btn admin-btn" href="admin.html" title="Admin panel">${I.pen} Admin</a>` : ""}`
       : `<button class="login-btn" id="loginBtn">${I.user} Login/Signup</button>`;
     return `
     <header class="header">
       <div class="wrap">
-        <a class="logo" href="index.html"><span class="logo-badge">F</span><span class="logo-text"><span><span class="n">Free</span>WebNOVEL</span></span></a>
+        <a class="logo" href="index.html"><span class="logo-badge">N</span><span class="logo-text"><span><span class="n">Novel</span>xplin</span></span></a>
         <ul class="main-nav">
           <li><a href="#" data-dd>Novel list <span class="caret"></span></a>
             <div class="dropdown">
@@ -120,25 +162,25 @@
         </form>
       </div>
     </header>
-    <div class="notice"><div class="wrap">${I.horn} <span>Read Novels Online &amp; Discover Free Stories</span></div></div>`;
+    <div class="notice"><div class="wrap">${I.horn} <span>Novelxplin &mdash; Read Web Novels Online, Free &amp; Fast</span></div></div>`;
   }
 
   function footer() {
     return `
     <footer class="footer">
       <div class="wrap">
-        <div class="brand">Freewebnovel.Com</div>
-        <div>Read Novels Online &amp; Discover Free Stories</div>
+        <div class="brand">Novelxplin</div>
+        <div>Read Web Novels Online &mdash; your library &amp; history sync across devices.</div>
         <div class="links"><a href="#">Contact</a><a href="#">Sitemap</a></div>
         <div class="links"><a href="#">Privacy Policy &amp; Terms of use</a></div>
-        <div class="copy">&copy; ${new Date().getFullYear()} Freewebnovel. All rights reserved.</div>
+        <div class="copy">&copy; ${new Date().getFullYear()} Novelxplin. All rights reserved.</div>
       </div>
     </footer>
     <div class="modal-bg" id="loginModal">
       <div class="modal" role="dialog" aria-modal="true">
-        <div class="modal-head"><h3>Welcome to Freewebnovel</h3><button id="closeModal" aria-label="Close">&times;</button></div>
+        <div class="modal-head"><h3>Welcome to Novelxplin</h3><button id="closeModal" aria-label="Close">&times;</button></div>
         <div class="modal-body">
-          <p>Create or log into your account to access terrific novels and protect your data.</p>
+          <p>Sign in to sync your library, reading history and comments across all your devices.</p>
           <button class="g-btn" id="googleLogin">
             <svg width="18" height="18" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.5 0 6.7 1.2 9.2 3.6l6.9-6.9C35.9 2.4 30.3 0 24 0 14.6 0 6.5 5.4 2.6 13.3l8 6.2C12.5 13.6 17.8 9.5 24 9.5z"/><path fill="#4285F4" d="M46.5 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.7c-.6 3-2.3 5.5-4.8 7.2l7.7 6c4.5-4.2 6.9-10.3 6.9-17.7z"/><path fill="#FBBC05" d="M10.6 28.5A14.5 14.5 0 0 1 9.8 24c0-1.6.3-3.1.8-4.5l-8-6.2A24 24 0 0 0 0 24c0 3.9.9 7.5 2.6 10.7l8-6.2z"/><path fill="#34A853" d="M24 48c6.3 0 11.7-2.1 15.6-5.7l-7.7-6c-2.1 1.4-4.8 2.3-7.9 2.3-6.2 0-11.5-4.1-13.4-9.8l-8 6.2C6.5 42.6 14.6 48 24 48z"/></svg>
             Log in with Google
@@ -154,7 +196,8 @@
   /* ---------- Components ---------- */
   function cover(n, extra) {
     const full = n.status === "Completed" && extra && extra.fullRibbon ? " full-badge" : "";
-    return `<a class="cover${full}" href="novel.html?n=${n.slug}" style="background:${n.color}"><span class="glyph">${n.glyph}</span><span class="cover-title">${esc(n.title)}</span></a>`;
+    const img = n.cover ? `<img src="${esc(n.cover)}" alt="" loading="lazy">` : "";
+    return `<a class="cover${full}${n.cover ? " has-img" : ""}" href="novel.html?n=${n.slug}" style="background:${n.color}">${img}<span class="glyph">${n.glyph}</span><span class="cover-title">${esc(n.title)}</span></a>`;
   }
   function stars(r) {
     const pct = Math.max(0, Math.min(100, (r / 5) * 100));
@@ -173,12 +216,12 @@
   }
   function releaseRow(n) {
     const ch = n.chapters;
-    const ct = DB.chapterTitle(n, ch).replace(/^Chapter /, "");
+    const ct = DB.chapterTitle(n, ch).replace(/^Chapter\s*\d+\s*[:\-]?\s*/i, "") || String(ch);
     return `<li>
       ${cover(n)}
       <div class="title truncate"><a href="novel.html?n=${n.slug}">${esc(n.title)}</a>${n.hot ? '<span class="badge-hot">HOT</span>' : ""}${n.isNew ? '<span class="badge-new">NEW</span>' : ""}</div>
       <div class="genres truncate">${n.genres.slice(0, 2).map(esc).join(", ")}</div>
-      <a class="chap truncate" href="read.html?n=${n.slug}&c=${ch}" title="${esc("Chapter " + ct)}">Chapter ${esc(ct)}</a>
+      <a class="chap truncate" href="read.html?n=${n.slug}&c=${ch}" title="${esc(DB.chapterTitle(n, ch))}">Ch. ${ch}${ct !== String(ch) ? ": " + esc(ct) : ""}</a>
       <div class="time">${DB.timeAgo(n.updatedMinutesAgo)}</div>
     </li>`;
   }
@@ -209,8 +252,10 @@
   window.UI = { $, $$, esc, q, cover, stars, metaLines, nCard, releaseRow, rankList, genreGrid, pagination, panel, breadcrumb, header, footer, I };
 
   /* ---------- Boot ---------- */
-  document.addEventListener("DOMContentLoaded", () => {
+  document.addEventListener("DOMContentLoaded", async () => {
+    await Promise.all([DB.ready, Auth.ready]);
     const h = $("#siteHeader"); if (h) h.innerHTML = header();
+    if (DB.error) toast("Could not reach novel server: " + DB.error.message);
     const f = $("#siteFooter"); if (f) f.innerHTML = footer();
 
     // dropdowns
@@ -234,7 +279,7 @@
     $("#loginBtn")?.addEventListener("click", openModal);
     $("#closeModal")?.addEventListener("click", closeModal);
     modal?.addEventListener("click", e => { if (e.target === modal) closeModal(); });
-    $("#googleLogin")?.addEventListener("click", () => { Auth.login(); toast("Logged in (demo) – backend coming soon"); setTimeout(() => location.reload(), 600); });
+    $("#googleLogin")?.addEventListener("click", async () => { try { await Auth.login(); closeModal(); toast("Signed in"); setTimeout(() => location.reload(), 400); } catch { } });
     $("#qrBtn")?.addEventListener("click", e => { e.preventDefault(); toast("Mobile app coming soon"); });
     window.openLogin = openModal;
 

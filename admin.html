@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Admin - Novelxplin</title>
+  <meta name="robots" content="noindex">
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Roboto+Condensed:wght@400;700&display=swap" rel="stylesheet">
+  <link rel="icon" type="image/svg+xml" href="img/favicon.svg">
+  <link rel="stylesheet" href="css/style.css">
+  <style>
+    .adm-form { display: grid; gap: 10px; }
+    .adm-form label { display: grid; gap: 4px; font-size: 12px; color: var(--muted); font-weight: 500; }
+    .adm-form input, .adm-form textarea, .adm-form select { font: inherit; padding: 8px 10px; border: 1px solid var(--line); border-radius: 4px; background: #fff; color: var(--text); width: 100%; }
+    .adm-form textarea { min-height: 90px; resize: vertical; }
+    .adm-form .two { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .adm-genres { display: flex; flex-wrap: wrap; gap: 6px; }
+    .adm-genres label { flex-direction: row; align-items: center; gap: 4px; font-size: 12px; border: 1px solid var(--line); border-radius: 20px; padding: 3px 9px; cursor: pointer; background: #fff; }
+    .adm-genres label:has(input:checked) { background: var(--accent); color: #fff; border-color: var(--accent); }
+    .adm-genres input { width: auto; }
+    .adm-list { display: grid; gap: 6px; }
+    .adm-list .row { display: flex; align-items: center; gap: 10px; padding: 8px; border: 1px solid var(--line); border-radius: 4px; background: #fff; font-size: 13px; }
+    .adm-list .row .t { flex: 1; min-width: 0; }
+    .adm-list .row .t b { display: block; }
+    .adm-list .row .t small { color: var(--muted); }
+    .adm-list .row.active { border-color: var(--accent); box-shadow: inset 3px 0 0 var(--accent); }
+    .pill { font-size: 11px; padding: 2px 7px; border-radius: 10px; background: #eef2f7; color: var(--muted); }
+    .pill.ok { background: #e6f6ea; color: var(--green); }
+    .drop { border: 2px dashed var(--line); border-radius: 6px; padding: 18px; text-align: center; color: var(--muted); font-size: 13px; background: #fafbfc; cursor: pointer; }
+    .drop.over { border-color: var(--accent); background: #fff7f0; }
+    .prog { height: 6px; background: #eee; border-radius: 3px; overflow: hidden; margin-top: 8px; display: none; }
+    .prog i { display: block; height: 100%; background: var(--accent); width: 0; transition: width .2s; }
+    .chap-rows { max-height: 360px; overflow: auto; }
+    .hint { font-size: 12px; color: var(--muted); }
+    .danger { color: #c0392b !important; }
+    .cover-prev { width: 70px; height: 95px; object-fit: cover; border-radius: 3px; border: 1px solid var(--line); background: #eee; }
+    @media (max-width: 700px) { .adm-form .two { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <div id="siteHeader"></div>
+  <main class="page">
+    <div class="wrap">
+      <div id="crumb"></div>
+      <div id="gate" class="panel" style="display:none"></div>
+      <div id="panelWrap" class="grid-2" style="display:none">
+        <div style="display:flex;flex-direction:column;gap:14px">
+          <section class="panel">
+            <div class="panel-head"><h2 id="nTitle"></h2><a class="more" href="admin.html" id="newBtn">+ New novel</a></div>
+            <form class="adm-form" id="novelForm">
+              <input type="hidden" name="slug">
+              <label>Title *<input name="title" required placeholder="Novel title"></label>
+              <div class="two">
+                <label>Author<input name="author" placeholder="Author name"></label>
+                <label>Type<select name="lang"></select></label>
+              </div>
+              <div class="two">
+                <label>Status<select name="status"><option>Ongoing</option><option>Completed</option></select></label>
+                <label>Rating (0–5)<input name="rating" type="number" step="0.1" min="0" max="5" value="0"></label>
+              </div>
+              <label>Genres<div class="adm-genres" id="genreBoxes"></div></label>
+              <label>Summary<textarea name="summary" placeholder="One paragraph per line"></textarea></label>
+              <div class="two">
+                <label>Cover image<div style="display:flex;gap:10px;align-items:center"><img class="cover-prev" id="coverPrev" alt=""><div style="flex:1"><input type="file" id="coverFile" accept="image/png,image/jpeg,image/webp,image/gif"><input name="cover" placeholder="or paste image URL" style="margin-top:6px"></div></div></label>
+                <label>Flags<div style="display:flex;gap:14px;padding-top:8px"><span><input type="checkbox" name="hot" style="width:auto"> Mark HOT</span></div></label>
+              </div>
+              <div class="btn-row"><button class="btn" type="submit" id="saveNovel">Save novel</button><button class="btn ghost danger" type="button" id="delNovel" style="display:none">Delete novel</button></div>
+            </form>
+          </section>
+
+          <section class="panel" id="chapPanel" style="display:none">
+            <div class="panel-head"><h2 id="cTitle"></h2><span class="more" id="cCount" style="color:var(--muted)"></span></div>
+            <div class="adm-form">
+              <div class="drop" id="drop">
+                <b>Bulk upload chapters</b><br>Drop <code>.txt</code> files here or click to pick (one chapter per file, or one big file).<br>
+                <span class="hint">Big file is auto-split on lines like “Chapter 12: Title” / “第12章”. Filenames like <code>chapter-12.txt</code> set the number.</span>
+                <input type="file" id="chapFiles" multiple accept=".txt,.md,text/plain" style="display:none">
+                <div class="prog" id="prog"><i></i></div>
+              </div>
+              <details>
+                <summary style="cursor:pointer;font-size:13px;font-weight:500">Or add / edit one chapter manually</summary>
+                <form id="chapForm" class="adm-form" style="margin-top:10px">
+                  <div class="two">
+                    <label>Chapter number (blank = next)<input name="num" type="number" min="1"></label>
+                    <label>Title<input name="title" placeholder="Chapter 1: The Beginning"></label>
+                  </div>
+                  <label>Body<textarea name="body" style="min-height:220px" placeholder="Paste chapter text…"></textarea></label>
+                  <div class="btn-row"><button class="btn" type="submit">Save chapter</button></div>
+                </form>
+              </details>
+              <div class="chap-rows adm-list" id="chapList"></div>
+            </div>
+          </section>
+        </div>
+
+        <aside class="sidebar-stack">
+          <section class="panel">
+            <div class="panel-head"><h2 id="lTitle"></h2><span class="more" id="lCount" style="color:var(--muted)"></span></div>
+            <input type="text" id="filter" placeholder="Filter novels…" style="width:100%;padding:7px 10px;border:1px solid var(--line);border-radius:4px;margin-bottom:8px;font:inherit">
+            <div class="adm-list" id="novelList"></div>
+          </section>
+          <section class="panel">
+            <div class="panel-head"><h2 id="tTitle"></h2></div>
+            <div class="btn-row"><a class="btn ghost" href="#" id="backupBtn">⬇ Download full backup</a></div>
+            <p class="hint" style="margin-top:8px">Server: <span id="health">…</span></p>
+          </section>
+        </aside>
+      </div>
+    </div>
+  </main>
+  <div id="siteFooter"></div>
+
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+  <script src="js/config.js"></script>
+  <script src="js/data.js"></script>
+  <script src="js/app.js"></script>
+  <script>
+    document.addEventListener("app:ready", async () => {
+      const { $, $$, esc, q, breadcrumb, I } = UI;
+      $("#crumb").innerHTML = breadcrumb([{ label: "Home", href: "index.html" }, { label: "Admin" }]);
+      const gate = $("#gate");
+      const user = Auth.user();
+      const devToken = new URLSearchParams(location.search).get("dev");
+      if (!devToken && (!user || !Auth.isAdmin())) {
+        gate.style.display = ""; gate.innerHTML = `<div class="empty">${I.user}<div>${user ? `Signed in as <b>${esc(user.email)}</b> – this account is not an admin.` : "Admin area. Please sign in with the admin Google account."}<br><br>${user ? `<a href="#" id="gOut" style="color:var(--link)">Sign out</a>` : `<button class="btn" id="gIn">${I.user} Sign in</button>`}</div></div>`;
+        $("#gIn")?.addEventListener("click", openLogin); $("#gOut")?.addEventListener("click", async e => { e.preventDefault(); await Auth.logout(); location.reload(); });
+        return;
+      }
+      $("#panelWrap").style.display = "";
+      $("#nTitle").innerHTML = `${I.pen} Novel details`; $("#lTitle").innerHTML = `${I.list} Novels`; $("#tTitle").innerHTML = `${I.shelf} Tools`; $("#cTitle").innerHTML = `${I.book} Chapters`;
+      $("#novelForm select[name=lang]").innerHTML = DB.LANGS.map(l => `<option>${esc(l)}</option>`).join("");
+      $("#genreBoxes").innerHTML = DB.GENRES.map(g => `<label><input type="checkbox" name="g" value="${esc(g)}">${esc(g)}</label>`).join("");
+
+      const authHdr = async () => ({ Authorization: "Bearer " + (devToken || await Auth.token()) });
+      async function call(method, path, body, raw) {
+        const h = await authHdr(); if (!raw) h["Content-Type"] = "application/json";
+        const r = await fetch((NX_CONFIG.API_BASE || "") + path, { method, headers: h, body: raw ? body : body ? JSON.stringify(body) : undefined });
+        const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || r.statusText); return j;
+      }
+      fetch((NX_CONFIG.API_BASE || "") + "/api/health").then(r => r.json()).then(h => $("#health").textContent = `${h.novels} novels · RAM ${(h.mem / 1048576).toFixed(0)} MB · up ${(h.uptime / 3600).toFixed(1)} h`).catch(() => $("#health").textContent = "unreachable");
+
+      let novels = DB.novels.slice(); let cur = null;
+      const nf = $("#novelForm");
+      function renderList() {
+        const f = $("#filter").value.toLowerCase();
+        const list = novels.filter(n => !f || n.title.toLowerCase().includes(f));
+        $("#lCount").textContent = `${novels.length} total`;
+        $("#novelList").innerHTML = list.length ? list.map(n => `<div class="row ${cur && cur.slug === n.slug ? "active" : ""}" data-s="${n.slug}"><div class="t"><b class="truncate">${esc(n.title)}</b><small>${n.chapters} ch · ${esc(n.status)}</small></div><span class="pill ${n.status === "Completed" ? "ok" : ""}">${esc(n.author || "—")}</span></div>`).join("") : `<div class="hint">No novels yet.</div>`;
+        $$("#novelList .row").forEach(r => r.addEventListener("click", () => select(novels.find(n => n.slug === r.dataset.s))));
+      }
+      $("#filter").addEventListener("input", renderList);
+
+      function fill(n) {
+        cur = n;
+        nf.slug.value = n ? n.slug : ""; nf.title.value = n ? n.title : ""; nf.author.value = n ? n.author || "" : ""; nf.lang.value = n ? n.lang : DB.LANGS[0];
+        nf.status.value = n ? n.status : "Ongoing"; nf.rating.value = n ? n.rating || 0 : 0; nf.summary.value = n ? (Array.isArray(n.summary) ? n.summary.join("\n") : n.summary || "") : "";
+        nf.cover.value = n ? n.cover || "" : ""; nf.hot.checked = !!(n && n.hot); $("#coverPrev").src = (n && n.cover) || "";
+        $$("#genreBoxes input").forEach(b => b.checked = !!(n && n.genres.includes(b.value)));
+        $("#delNovel").style.display = n ? "" : "none"; $("#saveNovel").textContent = n ? "Update novel" : "Create novel";
+        $("#chapPanel").style.display = n ? "" : "none";
+        if (n) { $("#cTitle").innerHTML = `${I.book} Chapters – ${esc(n.title)}`; loadChapters(); }
+        renderList();
+      }
+      function select(n) { fill(n); history.replaceState(null, "", n ? `admin.html?n=${n.slug}${devToken ? "&dev=" + devToken : ""}` : "admin.html"); }
+      $("#newBtn").addEventListener("click", e => { e.preventDefault(); select(null); });
+
+      $("#coverFile").addEventListener("change", async e => {
+        const f = e.target.files[0]; if (!f) return;
+        try { const r = await call("POST", "/api/upload", f, true); nf.cover.value = r.url; $("#coverPrev").src = r.url; toast("Cover uploaded"); } catch (err) { toast(err.message); }
+      });
+      nf.cover.addEventListener("change", () => $("#coverPrev").src = nf.cover.value);
+
+      nf.addEventListener("submit", async e => {
+        e.preventDefault();
+        const body = { title: nf.title.value, author: nf.author.value, lang: nf.lang.value, status: nf.status.value, rating: +nf.rating.value, summary: nf.summary.value, cover: nf.cover.value, hot: nf.hot.checked, genres: $$("#genreBoxes input:checked").map(b => b.value) };
+        try {
+          if (cur) { const n = await call("PUT", `/api/novels/${cur.slug}`, body); Object.assign(cur, n); toast("Novel updated"); }
+          else { const n = await call("POST", "/api/novels", body); novels.unshift(n); toast("Novel created – now add chapters"); select(n); return; }
+          renderList();
+        } catch (err) { toast(err.message); }
+      });
+      $("#delNovel").addEventListener("click", async () => {
+        if (!cur || !confirm(`Delete "${cur.title}" and ALL its chapters? This cannot be undone.`)) return;
+        try { await call("DELETE", `/api/novels/${cur.slug}`); novels = novels.filter(n => n.slug !== cur.slug); toast("Deleted"); select(null); } catch (err) { toast(err.message); }
+      });
+
+      // ---- chapters ----
+      let chaps = [];
+      async function loadChapters() {
+        chaps = await DB.chapters(cur.slug).catch(() => []);
+        cur.chapters = chaps.length; $("#cCount").textContent = `${chaps.length} chapters`;
+        $("#chapList").innerHTML = chaps.length ? [...chaps].reverse().map(c => `<div class="row"><div class="t"><b class="truncate">${esc(c.title)}</b><small>#${c.num} · ${esc((c.date || "").slice(0, 10))}</small></div><a href="read.html?n=${cur.slug}&c=${c.num}" target="_blank" class="pill">view</a><a href="#" class="pill" data-edit="${c.num}">edit</a><a href="#" class="pill danger" data-del="${c.num}">✕</a></div>`).join("") : `<div class="hint">No chapters yet – upload some above.</div>`;
+        $$("[data-del]").forEach(a => a.addEventListener("click", async e => { e.preventDefault(); if (!confirm(`Delete chapter ${a.dataset.del}?`)) return; try { await call("DELETE", `/api/novels/${cur.slug}/chapters/${a.dataset.del}`); toast("Chapter deleted"); loadChapters(); } catch (err) { toast(err.message); } }));
+        $$("[data-edit]").forEach(a => a.addEventListener("click", async e => { e.preventDefault(); const ch = await DB.chapter(cur.slug, a.dataset.edit); const cf = $("#chapForm"); cf.num.value = ch.num; cf.title.value = ch.title; cf.body.value = (ch.body || []).join("\n\n"); cf.closest("details").open = true; cf.scrollIntoView({ behavior: "smooth" }); }));
+        renderList();
+      }
+      $("#chapForm").addEventListener("submit", async e => {
+        e.preventDefault(); const cf = e.target;
+        const body = { num: cf.num.value ? +cf.num.value : undefined, title: cf.title.value, body: cf.body.value };
+        if (!body.body.trim()) return toast("Body is empty");
+        try {
+          if (body.num && chaps.some(c => c.num === body.num)) await call("PUT", `/api/novels/${cur.slug}/chapters/${body.num}`, body);
+          else await call("POST", `/api/novels/${cur.slug}/chapters`, body);
+          cf.reset(); toast("Chapter saved"); loadChapters();
+        } catch (err) { toast(err.message); }
+      });
+
+      // bulk upload
+      const drop = $("#drop"), fileIn = $("#chapFiles"), prog = $("#prog");
+      drop.addEventListener("click", e => { if (e.target === drop || e.target.tagName === "B" || e.target.tagName === "SPAN" || e.target.tagName === "CODE") fileIn.click(); });
+      ["dragenter", "dragover"].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add("over"); }));
+      ["dragleave", "drop"].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove("over"); }));
+      drop.addEventListener("drop", e => handleFiles([...e.dataTransfer.files]));
+      fileIn.addEventListener("change", e => handleFiles([...e.target.files]));
+
+      const CH_RE = /^\s*(?:chapter|ch\.?|第)\s*(\d+)\s*(?:章|话|話)?\s*[:：\-–—.]?\s*(.*)$/i;
+      function splitBig(text) {
+        const lines = text.replace(/\r/g, "").split("\n"); const out = []; let curC = null;
+        for (const ln of lines) {
+          const m = CH_RE.exec(ln);
+          if (m && ln.trim().length < 120) { if (curC) out.push(curC); curC = { num: +m[1], title: ln.trim(), body: [] }; }
+          else if (curC) curC.body.push(ln);
+        }
+        if (curC) out.push(curC);
+        return out.map(c => ({ ...c, body: c.body.join("\n") })).filter(c => c.body.trim());
+      }
+      async function handleFiles(files) {
+        files = files.filter(f => /\.(txt|md)$/i.test(f.name) || f.type.startsWith("text/"));
+        if (!files.length) return toast("Only .txt files");
+        files.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+        prog.style.display = ""; const bar = prog.firstElementChild; let done = 0, total = 0;
+        const existing = new Set(chaps.map(c => c.num)); let next = chaps.length ? chaps[chaps.length - 1].num + 1 : 1;
+        let batch = [];
+        const flush = async () => { if (!batch.length) return; const r = await call("POST", `/api/novels/${cur.slug}/chapters`, { chapters: batch }); total += r.saved.length; batch = []; };
+        try {
+          for (const f of files) {
+            const text = await f.text();
+            let items = text.length > 20000 || (text.match(CH_RE) && splitBig(text).length > 1) ? splitBig(text) : [];
+            if (!items.length) {
+              const m = /(\d+)/.exec(f.name); const lines = text.replace(/\r/g, "").split("\n"); const first = lines.find(l => l.trim()) || "";
+              const isTitle = CH_RE.test(first) && first.trim().length < 120;
+              const num = m ? +m[1] : next++; if (!m) next = Math.max(next, num + 1);
+              items = [{ num, title: isTitle ? first.trim() : `Chapter ${num}`, body: isTitle ? lines.slice(lines.indexOf(first) + 1).join("\n") : text }];
+            }
+            for (const it of items) { if (existing.has(it.num) && !confirm(`Chapter ${it.num} already exists. Overwrite?`)) continue; batch.push(it); if (batch.length >= 25) await flush(); }
+            done++; bar.style.width = Math.round(done / files.length * 100) + "%";
+          }
+          await flush(); toast(`Uploaded ${total} chapter(s)`);
+        } catch (err) { toast("Upload failed: " + err.message); }
+        prog.style.display = "none"; bar.style.width = "0"; fileIn.value = ""; loadChapters();
+      }
+
+      $("#backupBtn").addEventListener("click", async e => {
+        e.preventDefault(); toast("Preparing backup…");
+        try { const r = await fetch((NX_CONFIG.API_BASE || "") + "/api/backup", { headers: await authHdr() }); if (!r.ok) throw new Error((await r.json()).error); const b = await r.blob(); const a = document.createElement("a"); a.href = URL.createObjectURL(b); a.download = `novelxplin-backup-${new Date().toISOString().slice(0, 10)}.json.gz`; a.click(); } catch (err) { toast(err.message); }
+      });
+
+      renderList();
+      const pre = q.get("n") && novels.find(n => n.slug === q.get("n"));
+      fill(pre || null);
+    });
+  </script>
+</body>
+</html>

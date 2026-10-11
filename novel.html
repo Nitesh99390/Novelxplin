@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Novel - Free Web Novel</title>
+  <title>Novel - Novelxplin</title>
   <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Roboto+Condensed:wght@400;700&display=swap" rel="stylesheet">
   <link rel="icon" type="image/svg+xml" href="img/favicon.svg">
   <link rel="stylesheet" href="css/style.css">
@@ -47,40 +47,43 @@
     </div>
   </main>
   <div id="siteFooter"></div>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+  <script src="js/config.js"></script>
   <script src="js/data.js"></script>
   <script src="js/app.js"></script>
   <script>
-    document.addEventListener("app:ready", () => {
+    document.addEventListener("app:ready", async () => {
       const { $, esc, q, stars, nCard, genreGrid, rankList, pagination, breadcrumb, I } = UI;
       const n = DB.get(q.get("n"));
       if (!n) { $("#head").innerHTML = `<div class="empty">${I.search}<div>Novel not found.</div></div>`; return; }
-      document.title = `${n.title} - Free Web Novel`;
+      document.title = `${n.title} - Novelxplin`;
       const PER = 50;
-      const page = Math.max(1, parseInt(q.get("page") || "1", 10));
-      const pages = Math.ceil(n.chapters / PER);
-      const cur = Math.min(page, pages);
       const hist = Lib.history()[n.id];
       const inLib = Lib.has(n.id);
-      const views = n.views >= 1e6 ? (n.views / 1e6).toFixed(1) + "M" : Math.round(n.views / 1e3) + "K";
+      const views = n.views >= 1e6 ? (n.views / 1e6).toFixed(1) + "M" : n.views >= 1e3 ? Math.round(n.views / 1e3) + "K" : n.views;
+      const coverHtml = n.cover ? `<a class="cover has-img${n.status === "Completed" ? " full-badge" : ""}"><img src="${esc(n.cover)}" alt="${esc(n.title)}"></a>` : `<a class="cover${n.status === "Completed" ? " full-badge" : ""}" style="background:${n.color}"><span class="glyph">${n.glyph}</span></a>`;
 
       $("#crumb").innerHTML = breadcrumb([{ label: "Home", href: "index.html" }, { label: n.genres[0], href: `genre.html?g=${encodeURIComponent(n.genres[0])}` }, { label: n.title }]);
       $("#head").innerHTML = `<div class="novel-head">
-        <a class="cover${n.status === "Completed" ? " full-badge" : ""}" style="background:${n.color}"><span class="glyph">${n.glyph}</span></a>
+        ${coverHtml}
         <div>
           <h1>${esc(n.title)}${n.hot ? '<span class="badge-hot">HOT</span>' : ""}</h1>
           <div style="margin-bottom:10px">${stars(n.rating)} <span style="color:var(--muted);font-size:12px;margin-left:6px">${n.votes} ratings</span></div>
-          <div class="info-row"><div class="k">${I.pen} Author</div><div class="v"><a href="search.html?q=${encodeURIComponent(n.author)}">${esc(n.author)}</a></div></div>
+          <div class="info-row"><div class="k">${I.pen} Author</div><div class="v"><a href="search.html?q=${encodeURIComponent(n.author || "")}">${esc(n.author || "Unknown")}</a></div></div>
           <div class="info-row"><div class="k">${I.globe} Type</div><div class="v">${esc(n.lang)}</div></div>
           <div class="info-row"><div class="k">${I.tag} Genres</div><div class="v tag-list">${n.genres.map(g => `<a href="genre.html?g=${encodeURIComponent(g)}">${esc(g)}</a>`).join("")}</div></div>
           <div class="info-row"><div class="k">${I.check} Status</div><div class="v" style="color:${n.status === "Completed" ? "var(--green)" : "var(--accent)"};font-weight:700">${n.status}</div></div>
           <div class="info-row"><div class="k">${I.book} Chapters</div><div class="v">${n.chapters}</div></div>
           <div class="info-row"><div class="k">${I.eye} Views</div><div class="v">${views}</div></div>
-          <div class="info-row"><div class="k">${I.clock} Updated</div><div class="v">${DB.timeAgo(n.updatedMinutesAgo)} &middot; <a href="read.html?n=${n.slug}&c=${n.chapters}">${esc(DB.chapterTitle(n, n.chapters))}</a></div></div>
+          <div class="info-row"><div class="k">${I.clock} Updated</div><div class="v">${DB.timeAgo(n.updatedMinutesAgo)}${n.chapters ? ` &middot; <a href="read.html?n=${n.slug}&c=${n.chapters}">${esc(DB.chapterTitle(n, n.chapters))}</a>` : ""}</div></div>
           <div class="btn-row">
-            <a class="btn" href="read.html?n=${n.slug}&c=1">${I.book} Read First</a>
-            <a class="btn alt" href="read.html?n=${n.slug}&c=${n.chapters}">${I.right} Read Latest</a>
+            ${n.chapters ? `<a class="btn" href="read.html?n=${n.slug}&c=1">${I.book} Read First</a>
+            <a class="btn alt" href="read.html?n=${n.slug}&c=${n.chapters}">${I.right} Read Latest</a>` : `<span class="btn disabled">No chapters yet</span>`}
             ${hist ? `<a class="btn ghost" href="read.html?n=${n.slug}&c=${hist.chap}">${I.clock} Continue Ch. ${hist.chap}</a>` : ""}
             <button class="btn ghost ${inLib ? "active" : ""}" id="libBtn">${I.heart} <span>${inLib ? "In Library" : "Add to Library"}</span></button>
+            ${Auth.isAdmin() ? `<a class="btn ghost" href="admin.html?n=${n.slug}">${I.pen} Edit / Add chapters</a>` : ""}
           </div>
         </div></div>`;
       $("#libBtn").addEventListener("click", e => {
@@ -91,23 +94,25 @@
       });
 
       $("#sTitle").innerHTML = `${I.list} Summary`;
-      $("#summary").innerHTML = n.summary.map(p => `<p>${esc(p)}</p>`).join("") + `<p style="color:var(--muted);font-size:12px">You're reading <b>${esc(n.title)}</b> on Freewebnovel. ${n.status === "Completed" ? "This novel is completed." : "New chapters are released regularly."}</p>`;
+      $("#summary").innerHTML = (n.summary.length ? n.summary.map(p => `<p>${esc(p)}</p>`).join("") : "<p>No summary yet.</p>") + `<p style="color:var(--muted);font-size:12px">You're reading <b>${esc(n.title)}</b> on Novelxplin. ${n.status === "Completed" ? "This novel is completed." : "New chapters are released regularly."}</p>`;
       $("#toggleSummary").addEventListener("click", e => { e.preventDefault(); const s = $("#summary"); s.classList.toggle("collapsed"); e.target.textContent = s.classList.contains("collapsed") ? "Show more" : "Show less"; });
 
       $("#cTitle").innerHTML = `${I.list} Chapters <span style="color:var(--muted);font-weight:400;font-size:12px;margin-left:4px">(${n.chapters})</span>`;
+      $("#chapters").innerHTML = `<div class="empty" style="grid-column:1/-1">Loading chapters…</div>`;
+      let all = [];
+      try { all = await DB.chapters(n.slug); } catch (e) { $("#chapters").innerHTML = `<div class="empty" style="grid-column:1/-1">Failed to load chapters.</div>`; }
+      const pages = Math.max(1, Math.ceil(all.length / PER));
+      let cur = Math.min(Math.max(1, parseInt(q.get("page") || "1", 10)), pages);
       const sel = $("#chapRange");
-      for (let p = 1; p <= pages; p++) { const o = document.createElement("option"); o.value = p; o.textContent = `${(p - 1) * PER + 1} - ${Math.min(p * PER, n.chapters)}`; if (p === cur) o.selected = true; sel.appendChild(o); }
-      sel.addEventListener("change", () => location.href = `novel.html?n=${n.slug}&page=${sel.value}#chapters`);
+      for (let p = 1; p <= pages; p++) { const o = document.createElement("option"); o.value = p; o.textContent = `${(p - 1) * PER + 1} - ${Math.min(p * PER, all.length)}`; if (p === cur) o.selected = true; sel.appendChild(o); }
+      sel.addEventListener("change", () => { cur = +sel.value; renderChapters(""); });
 
+      const row = ch => `<a href="read.html?n=${n.slug}&c=${ch.num}" class="${ch.num > all.length - 3 && n.status !== "Completed" ? "new-chap" : ""}">${I.chev}<span class="t truncate">${esc(ch.title || "Chapter " + ch.num)}</span><span class="d">${esc((ch.date || "").slice(0, 10))}</span></a>`;
       function renderChapters(filter) {
         let items;
-        if (filter) {
-          const f = filter.toLowerCase(); items = [];
-          for (let c = n.chapters; c >= 1 && items.length < 100; c--) { const t = DB.chapterTitle(n, c); if (t.toLowerCase().includes(f)) items.push(c); }
-        } else {
-          items = []; for (let c = (cur - 1) * PER + 1; c <= Math.min(cur * PER, n.chapters); c++) items.push(c);
-        }
-        $("#chapters").innerHTML = items.length ? items.map(c => `<a href="read.html?n=${n.slug}&c=${c}" class="${c > n.chapters - 3 && n.status !== "Completed" ? "new-chap" : ""}">${I.chev}<span class="t truncate">${esc(DB.chapterTitle(n, c))}</span><span class="d">${DB.chapterDate(n, c)}</span></a>`).join("") : `<div class="empty" style="grid-column:1/-1">No chapters match.</div>`;
+        if (filter) { const f = filter.toLowerCase(); items = all.filter(c => (c.title || "").toLowerCase().includes(f) || String(c.num) === f).slice(0, 100); }
+        else items = all.slice((cur - 1) * PER, cur * PER);
+        $("#chapters").innerHTML = items.length ? items.map(row).join("") : `<div class="empty" style="grid-column:1/-1">No chapters${filter ? " match" : " yet"}.</div>`;
         $("#chapPager").innerHTML = filter ? "" : pagination(cur, pages, p => `novel.html?n=${n.slug}&page=${p}#chapters`);
       }
       renderChapters("");
