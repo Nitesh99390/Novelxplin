@@ -12,11 +12,13 @@ window.NX_CONFIG = {
   API_BASE: "",
   ADMIN_EMAILS: ["bhuimharniteshbhuimhar@gmail.com"],
   FIREBASE: {
-    apiKey: "PASTE_FIREBASE_API_KEY",
-    authDomain: "PASTE_PROJECT_ID.firebaseapp.com",
-    projectId: "PASTE_PROJECT_ID",
-    storageBucket: "PASTE_PROJECT_ID.appspot.com",
-    messagingSenderId: "PASTE_SENDER_ID",
-    appId: "PASTE_APP_ID"
+    apiKey: "AIzaSyBbkeL5K-XCRjskiLjR1h1pDzLRLWwvIXg",
+    authDomain: "nitesh-75d47.firebaseapp.com",
+    databaseURL: "https://nitesh-75d47-default-rtdb.firebaseio.com",
+    projectId: "nitesh-75d47",
+    storageBucket: "nitesh-75d47.firebasestorage.app",
+    messagingSenderId: "319671865593",
+    appId: "1:319671865593:web:98fd66daa5062e4f401228",
+    measurementId: "G-NJNBZQNZNG"
   }
 };
