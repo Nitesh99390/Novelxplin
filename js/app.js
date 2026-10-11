@@ -111,7 +111,7 @@
   function header() {
     const user = Auth.user();
     const userHtml = user
-      ? `<a class="login-btn user-pill" href="library.html" title="${esc(user.email)}">${user.photo ? `<img class="avatar" src="${esc(user.photo)}" alt="" referrerpolicy="no-referrer">` : `<span class="avatar">${esc(user.name[0])}</span>`}${esc(user.name)}</a>${user.admin ? `<a class="login-btn admin-btn" href="admin.html" title="Admin panel">${I.pen} Admin</a>` : ""}`
+      ? `<a class="login-btn user-pill" href="library.html" title="${esc(user.email)}">${user.photo ? `<img class="avatar" src="${esc(user.photo)}" alt="" referrerpolicy="no-referrer">` : `<span class="avatar">${esc(user.name[0])}</span>`}<span class="name">${esc(user.name)}</span></a>${user.admin ? `<a class="login-btn admin-btn" href="admin.html" title="Admin panel">${I.pen} Admin</a>` : ""}`
       : `<button class="login-btn" id="loginBtn">${I.user} Login/Signup</button>`;
     return `
     <header class="header">

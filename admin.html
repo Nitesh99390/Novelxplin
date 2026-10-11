@@ -9,32 +9,57 @@
   <link rel="icon" type="image/svg+xml" href="img/favicon.svg">
   <link rel="stylesheet" href="css/style.css">
   <style>
-    .adm-form { display: grid; gap: 10px; }
-    .adm-form label { display: grid; gap: 4px; font-size: 12px; color: var(--muted); font-weight: 500; }
-    .adm-form input, .adm-form textarea, .adm-form select { font: inherit; padding: 8px 10px; border: 1px solid var(--line); border-radius: 4px; background: #fff; color: var(--text); width: 100%; }
+    #panelWrap > div, #panelWrap > aside, .panel { min-width: 0; }
+    .panel > .adm-form, .panel > .btn-row, .panel > .hint, .panel > #filter, .panel > .adm-list { margin-left: 12px; margin-right: 12px; }
+    .panel > .adm-form { padding: 12px 0; }
+    .panel > .btn-row { margin-top: 12px; }
+    .panel > .hint { padding-bottom: 12px; }
+    .panel > #filter { width: calc(100% - 24px) !important; margin-top: 12px; }
+    .panel > .adm-list { padding-bottom: 12px; }
+    .adm-form { display: grid; gap: 12px; min-width: 0; }
+    .adm-form label { display: grid; gap: 4px; font-size: 12px; color: var(--muted); font-weight: 500; min-width: 0; }
+    .adm-form input, .adm-form textarea, .adm-form select { font: inherit; padding: 8px 10px; border: 1px solid var(--line); border-radius: 4px; background: #fff; color: var(--text); width: 100%; max-width: 100%; min-width: 0; font-size: 14px; }
+    .adm-form input:focus, .adm-form textarea:focus, .adm-form select:focus { outline: 0; border-color: var(--accent); box-shadow: 0 0 0 2px rgba(240,118,26,.15); }
+    .adm-form input[type=file] { padding: 6px; font-size: 12px; }
+    .adm-form input[type=checkbox] { width: 16px; height: 16px; accent-color: var(--accent); }
     .adm-form textarea { min-height: 90px; resize: vertical; }
-    .adm-form .two { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .adm-form .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; }
     .adm-genres { display: flex; flex-wrap: wrap; gap: 6px; }
-    .adm-genres label { flex-direction: row; align-items: center; gap: 4px; font-size: 12px; border: 1px solid var(--line); border-radius: 20px; padding: 3px 9px; cursor: pointer; background: #fff; }
+    .adm-genres label { display: inline-flex; flex-direction: row; align-items: center; gap: 5px; font-size: 12px; border: 1px solid var(--line); border-radius: 20px; padding: 4px 10px; cursor: pointer; background: #fff; color: var(--text); user-select: none; }
     .adm-genres label:has(input:checked) { background: var(--accent); color: #fff; border-color: var(--accent); }
-    .adm-genres input { width: auto; }
+    .adm-genres input { position: absolute; opacity: 0; width: 0 !important; height: 0; pointer-events: none; }
+    .adm-genres label { position: relative; }
+    .adm-genres label::before { content: "+"; font-weight: 700; font-size: 13px; line-height: 1; opacity: .6; }
+    .adm-genres label:has(input:checked)::before { content: "✓"; opacity: 1; }
+    .adm-genres label:has(input:focus-visible) { box-shadow: 0 0 0 2px rgba(240,118,26,.35); }
+    .cover-row { display: flex; gap: 10px; align-items: flex-start; min-width: 0; }
+    .cover-row > div { flex: 1; min-width: 0; }
+    .flag-row { display: flex; flex-wrap: wrap; gap: 14px; padding-top: 8px; }
+    .flag-row span { display: inline-flex; align-items: center; gap: 6px; color: var(--text); }
     .adm-list { display: grid; gap: 6px; }
     .adm-list .row { display: flex; align-items: center; gap: 10px; padding: 8px; border: 1px solid var(--line); border-radius: 4px; background: #fff; font-size: 13px; }
     .adm-list .row .t { flex: 1; min-width: 0; }
-    .adm-list .row .t b { display: block; }
+    .adm-list .row .t b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .adm-list .row .pill { flex-shrink: 0; max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .adm-list .row .t small { color: var(--muted); }
     .adm-list .row.active { border-color: var(--accent); box-shadow: inset 3px 0 0 var(--accent); }
     .pill { font-size: 11px; padding: 2px 7px; border-radius: 10px; background: #eef2f7; color: var(--muted); }
     .pill.ok { background: #e6f6ea; color: var(--green); }
-    .drop { border: 2px dashed var(--line); border-radius: 6px; padding: 18px; text-align: center; color: var(--muted); font-size: 13px; background: #fafbfc; cursor: pointer; }
+    .drop { border: 2px dashed var(--line); border-radius: 6px; padding: 18px; text-align: center; color: var(--muted); font-size: 13px; background: #fafbfc; cursor: pointer; overflow-wrap: anywhere; }
     .drop.over { border-color: var(--accent); background: #fff7f0; }
     .prog { height: 6px; background: #eee; border-radius: 3px; overflow: hidden; margin-top: 8px; display: none; }
     .prog i { display: block; height: 100%; background: var(--accent); width: 0; transition: width .2s; }
     .chap-rows { max-height: 360px; overflow: auto; }
     .hint { font-size: 12px; color: var(--muted); }
     .danger { color: #c0392b !important; }
-    .cover-prev { width: 70px; height: 95px; object-fit: cover; border-radius: 3px; border: 1px solid var(--line); background: #eee; }
-    @media (max-width: 700px) { .adm-form .two { grid-template-columns: 1fr; } }
+    .cover-prev { width: 70px; height: 95px; object-fit: cover; border-radius: 3px; border: 1px solid var(--line); background: #eee; flex-shrink: 0; }
+    .btn-row .btn { flex: 1 1 auto; justify-content: center; }
+    @media (max-width: 700px) {
+      .adm-form .two { grid-template-columns: 1fr; }
+      .adm-form input, .adm-form textarea, .adm-form select { font-size: 16px; } /* prevent iOS zoom */
+      .adm-genres label { padding: 6px 11px; font-size: 13px; }
+      .chap-rows { max-height: 420px; }
+    }
   </style>
 </head>
 <body>
@@ -61,8 +86,8 @@
               <label>Genres<div class="adm-genres" id="genreBoxes"></div></label>
               <label>Summary<textarea name="summary" placeholder="One paragraph per line"></textarea></label>
               <div class="two">
-                <label>Cover image<div style="display:flex;gap:10px;align-items:center"><img class="cover-prev" id="coverPrev" alt=""><div style="flex:1"><input type="file" id="coverFile" accept="image/png,image/jpeg,image/webp,image/gif"><input name="cover" placeholder="or paste image URL" style="margin-top:6px"></div></div></label>
-                <label>Flags<div style="display:flex;gap:14px;padding-top:8px"><span><input type="checkbox" name="hot" style="width:auto"> Mark HOT</span></div></label>
+                <label>Cover image<div class="cover-row"><img class="cover-prev" id="coverPrev" alt=""><div><input type="file" id="coverFile" accept="image/png,image/jpeg,image/webp,image/gif"><input name="cover" placeholder="or paste image URL" style="margin-top:6px"></div></div></label>
+                <label>Flags<div class="flag-row"><span><input type="checkbox" name="hot"> Mark HOT</span></div></label>
               </div>
               <div class="btn-row"><button class="btn" type="submit" id="saveNovel">Save novel</button><button class="btn ghost danger" type="button" id="delNovel" style="display:none">Delete novel</button></div>
             </form>
@@ -96,7 +121,7 @@
         <aside class="sidebar-stack">
           <section class="panel">
             <div class="panel-head"><h2 id="lTitle"></h2><span class="more" id="lCount" style="color:var(--muted)"></span></div>
-            <input type="text" id="filter" placeholder="Filter novels…" style="width:100%;padding:7px 10px;border:1px solid var(--line);border-radius:4px;margin-bottom:8px;font:inherit">
+            <input type="text" id="filter" placeholder="Filter novels…" style="padding:7px 10px;border:1px solid var(--line);border-radius:4px;margin-bottom:8px;font:inherit">
             <div class="adm-list" id="novelList"></div>
           </section>
           <section class="panel">
