@@ -49,7 +49,19 @@
     try { firebase.initializeApp(CFG.FIREBASE); fbAuth = firebase.auth(); fbDb = firebase.firestore(); }
     catch (e) { console.warn("Firebase init failed", e); }
   }
-  const isAdminEmail = em => !!em && (CFG.ADMIN_EMAILS || []).map(x => x.toLowerCase()).includes(String(em).toLowerCase());
+  // Owner emails from config are always admins. Extra admins are managed by the owner
+  // on the server (data/admins.json) – we ask /api/me after login so a newly-added
+  // email becomes admin automatically on its next sign-in.
+  const isOwnerEmail = em => !!em && (CFG.ADMIN_EMAILS || []).map(x => x.toLowerCase()).includes(String(em).toLowerCase());
+  async function resolveRole(u) {
+    const base = { admin: isOwnerEmail(u.email), owner: isOwnerEmail(u.email) };
+    try {
+      const tok = await u.getIdToken();
+      const r = await fetch((CFG.API_BASE || "").replace(/\/$/, "") + "/api/me", { headers: { Authorization: "Bearer " + tok } });
+      if (r.ok) { const j = await r.json(); return { admin: !!j.admin || base.admin, owner: !!j.owner || base.owner }; }
+    } catch (e) { console.warn("role check", e.message); }
+    return base;
+  }
   const userDoc = () => (fbDb && curUser) ? fbDb.collection("users").doc(curUser.uid) : null;
   // write-through: update localStorage immediately, push to Firestore in background
   function pushCloud(patch) { const d = userDoc(); if (d) d.set(patch, { merge: true }).catch(e => console.warn("sync", e.message)); }
@@ -69,14 +81,15 @@
         const hist = Object.assign({}, c.history || {}, this.history());
         for (const k in (c.history || {})) if (hist[k] && c.history[k].at > hist[k].at) hist[k] = c.history[k];
         store.set("nx_library", lib); store.set("nx_history", hist);
-        d.set({ library: lib, history: hist, email: curUser.email, name: curUser.displayName || "", photo: curUser.photoURL || "", admin: isAdminEmail(curUser.email), lastSeen: Date.now() }, { merge: true });
+        d.set({ library: lib, history: hist, email: curUser.email, name: curUser.displayName || "", photo: curUser.photoURL || "", admin: Auth.isAdmin(), lastSeen: Date.now() }, { merge: true });
       } catch (e) { console.warn("pull", e.message); }
     }
   };
   const Auth = {
     enabled: !!fbAuth,
     user() { return store.get("nx_user", null); },
-    isAdmin() { const u = this.user(); return !!u && isAdminEmail(u.email); },
+    isAdmin() { const u = this.user(); return !!u && (u.admin === true || isOwnerEmail(u.email)); },
+    isOwner() { const u = this.user(); return !!u && (u.owner === true || isOwnerEmail(u.email)); },
     async token() { return fbAuth && fbAuth.currentUser ? fbAuth.currentUser.getIdToken() : null; },
     async login() {
       if (!fbAuth) { toast("Firebase config missing – set js/config.js"); return null; }
@@ -89,7 +102,7 @@
       if (!fbAuth) return res(null);
       const off = fbAuth.onAuthStateChanged(async u => {
         curUser = u;
-        if (u) { store.set("nx_user", { uid: u.uid, name: u.displayName || u.email.split("@")[0], email: u.email, photo: u.photoURL || "", admin: isAdminEmail(u.email) }); await Lib.pull(); }
+        if (u) { const role = await resolveRole(u); store.set("nx_user", { uid: u.uid, name: u.displayName || u.email.split("@")[0], email: u.email, photo: u.photoURL || "", admin: role.admin, owner: role.owner }); await Lib.pull(); }
         else localStorage.removeItem("nx_user");
         res(u); off && typeof off === "function" && 0; // keep listening for later changes
         document.dispatchEvent(new CustomEvent("auth:change", { detail: u }));

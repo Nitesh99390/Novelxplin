@@ -24,9 +24,11 @@ const DATA = path.join(ROOT, "data");
 const CHAP = path.join(DATA, "chapters");
 const UPLOADS = path.join(DATA, "uploads");
 const CATALOG = path.join(DATA, "catalog.json");
+const ADMINS_FILE = path.join(DATA, "admins.json");
 const PORT = +process.env.PORT || 3000;
 
-// Admin emails: env override or js/config.js
+// Owner emails (super-admins): env override or js/config.js. Owners can add/remove
+// extra admins from the admin panel; those are persisted in data/admins.json.
 let ADMIN_EMAILS = (process.env.ADMIN_EMAILS || "").split(",").map(s => s.trim().toLowerCase()).filter(Boolean);
 let FIREBASE_PROJECT = process.env.FIREBASE_PROJECT_ID || "";
 try {
@@ -40,6 +42,21 @@ if (!ADMIN_EMAILS.length) ADMIN_EMAILS = ["bhuimharniteshbhuimhar@gmail.com"];
 
 for (const d of [DATA, CHAP, UPLOADS]) fs.mkdirSync(d, { recursive: true });
 if (!fs.existsSync(CATALOG)) fs.writeFileSync(CATALOG, "[]");
+if (!fs.existsSync(ADMINS_FILE)) fs.writeFileSync(ADMINS_FILE, "[]");
+
+/* ---------- admins (owner-managed, persisted in data/admins.json) ---------- */
+const OWNERS = ADMIN_EMAILS.slice();
+let extraAdmins = []; // [{ email, addedBy, addedAt }]
+try { extraAdmins = JSON.parse(fs.readFileSync(ADMINS_FILE, "utf8")); if (!Array.isArray(extraAdmins)) extraAdmins = []; } catch { extraAdmins = []; }
+async function saveAdmins() {
+  const tmp = ADMINS_FILE + ".tmp";
+  await fsp.writeFile(tmp, JSON.stringify(extraAdmins, null, 2));
+  await fsp.rename(tmp, ADMINS_FILE);
+}
+const normEmail = e => String(e || "").trim().toLowerCase();
+const isOwner = e => OWNERS.includes(normEmail(e));
+const isAdmin = e => { e = normEmail(e); return !!e && (OWNERS.includes(e) || extraAdmins.some(a => a.email === e)); };
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 /* ---------- catalog (kept in memory, persisted atomically) ---------- */
 let catalog = [];
@@ -115,10 +132,16 @@ async function requireAdmin(req) {
   const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
   if (!token) throw Object.assign(new Error("Login required"), { status: 401 });
   // Dev bypass: ADMIN_DEV_TOKEN env lets you test without Firebase
-  if (process.env.ADMIN_DEV_TOKEN && token === process.env.ADMIN_DEV_TOKEN) return { email: ADMIN_EMAILS[0], dev: true };
+  if (process.env.ADMIN_DEV_TOKEN && token === process.env.ADMIN_DEV_TOKEN) return { email: OWNERS[0], dev: true, owner: true };
   let p; try { p = await verifyIdToken(token); } catch (e) { throw Object.assign(new Error("Invalid token: " + e.message), { status: 401 }); }
-  if (!ADMIN_EMAILS.includes(String(p.email).toLowerCase())) throw Object.assign(new Error("Not an admin"), { status: 403 });
+  if (!isAdmin(p.email)) throw Object.assign(new Error("Not an admin"), { status: 403 });
+  p.owner = isOwner(p.email);
   return p;
+}
+async function requireOwner(req) {
+  const u = await requireAdmin(req);
+  if (!u.owner) throw Object.assign(new Error("Only the site owner can manage admins"), { status: 403 });
+  return u;
 }
 
 /* ---------- helpers ---------- */
@@ -167,7 +190,36 @@ async function handle(req, res) {
   if (p.startsWith("/api/")) {
     const seg = p.split("/").filter(Boolean); // api, novels, slug, chapters, num
     if (seg[1] === "health") return send(res, 200, { ok: true, novels: catalog.length, uptime: process.uptime(), mem: process.memoryUsage().rss });
-    if (seg[1] === "me") { try { const u = await requireAdmin(req); return send(res, 200, { email: u.email, admin: true }); } catch (e) { return send(res, e.status || 401, { admin: false, error: e.message }); } }
+    if (seg[1] === "me") { try { const u = await requireAdmin(req); return send(res, 200, { email: u.email, admin: true, owner: !!u.owner }); } catch (e) { return send(res, e.status || 401, { admin: false, owner: false, error: e.message }); } }
+
+    // ---- admin management (owner only) ----
+    if (seg[1] === "admins") {
+      const u = await requireOwner(req);
+      const list = () => ({ owners: OWNERS, admins: extraAdmins });
+      if (!seg[2] && req.method === "GET") return send(res, 200, list(), { "Cache-Control": "no-cache" });
+      if (!seg[2] && req.method === "POST") {
+        const body = await readJSON(req, 64 * 1024);
+        const email = normEmail(body.email);
+        if (!EMAIL_RE.test(email)) return send(res, 400, { error: "Invalid email address" });
+        if (isOwner(email)) return send(res, 400, { error: "That email is already the site owner" });
+        if (extraAdmins.some(a => a.email === email)) return send(res, 409, { error: "Already an admin" });
+        extraAdmins.push({ email, addedBy: normEmail(u.email), addedAt: new Date().toISOString() });
+        await saveAdmins();
+        console.log(`[admins] ${u.email} added ${email}`);
+        return send(res, 201, list());
+      }
+      if (seg[2] && req.method === "DELETE") {
+        const email = normEmail(seg[2]);
+        if (isOwner(email)) return send(res, 400, { error: "The site owner cannot be removed" });
+        const before = extraAdmins.length;
+        extraAdmins = extraAdmins.filter(a => a.email !== email);
+        if (extraAdmins.length === before) return send(res, 404, { error: "Admin not found" });
+        await saveAdmins();
+        console.log(`[admins] ${u.email} removed ${email}`);
+        return send(res, 200, list());
+      }
+      return send(res, 405, { error: "Method not allowed" });
+    }
 
     if (seg[1] === "novels") {
       const slug = seg[2]; const sub = seg[3]; const num = seg[4];
@@ -276,4 +328,4 @@ async function handle(req, res) {
 
 http.createServer((req, res) => {
   handle(req, res).catch(e => { if (!res.headersSent) send(res, e.status || 500, { error: e.message || "Server error" }); else res.end(); if (!e.status) console.error(e); });
-}).listen(PORT, "0.0.0.0", () => console.log(`Novelxplin server on http://0.0.0.0:${PORT}  (admins: ${ADMIN_EMAILS.join(", ")})`));
+}).listen(PORT, "0.0.0.0", () => console.log(`Novelxplin server on http://0.0.0.0:${PORT}  (owner: ${OWNERS.join(", ")}; extra admins: ${extraAdmins.length})`));
