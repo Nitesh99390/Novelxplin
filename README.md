@@ -26,6 +26,7 @@ and can upload / edit / delete novels. Extra admins are stored in `data/admins.j
 | `read.html?n=<slug>&c=<n>` | Reader – themes, font, size, keyboard nav, comments (Firestore) |
 | `library.html` | Library + history (localStorage, synced to Firestore when signed in) |
 | `admin.html` | **Admin only** – create/edit/delete novels, cover upload, `.epub` chapter upload, backup |
+| Telegram bot | **Admin only** – upload novels from your phone: photo → details → `.epub` (see §4) |
 
 ## 1. Firebase setup (5 min)
 
@@ -70,6 +71,43 @@ Memory footprint ≈ 50 MB RSS; chapters are streamed from disk, so 47 GB storag
    * Existing chapter numbers prompt once for overwrite. Multiple `.epub` files can be dropped together (uploaded in filename order).
 4. Or add/edit a single chapter manually. Delete / edit from the list.
 5. **Download full backup** → one `.json.gz` with every novel + chapter.
+
+## 4. Telegram upload bot (upload from your phone)
+
+The server includes a zero-dependency Telegram bot. Send it a **photo → details → .epub file** and
+the novel is published on the site. **Author is always `Nitesh`**; nothing else ("uploaded by",
+"source") is stored.
+
+1. In Telegram open **@BotFather → /newbot** → copy the token.
+2. On the server:
+   ```bash
+   sudo systemctl edit novelxplin      # or edit /etc/systemd/system/novelxplin.service
+   ```
+   add under `[Service]`:
+   ```ini
+   Environment=TELEGRAM_BOT_TOKEN=123456:ABC...
+   Environment=TELEGRAM_ADMIN_IDS=            # optional: your Telegram user id(s), comma separated
+   Environment=SITE_URL=http://144.24.114.118
+   ```
+   then `sudo systemctl daemon-reload && sudo systemctl restart novelxplin`.
+   (Or pass them when running `bash deploy/setup-oracle.sh`:
+   `TELEGRAM_BOT_TOKEN=... bash deploy/setup-oracle.sh`.)
+3. Open your bot in Telegram and press **/start**. If `TELEGRAM_ADMIN_IDS` is empty the **first**
+   user who sends `/start` becomes the bot owner (saved in `data/bot.json`); everyone else is rejected.
+
+**Usage in chat**
+
+| Step | Send | Notes |
+|---|---|---|
+| 1 | Cover **photo** | caption may already contain the details |
+| 2 | Details text | `Title: …` / `Genres: Fantasy, Action` / `Status: Ongoing\|Completed` / `Summary: …` (multi-line ok). Plain text works too: first line = title, rest = summary |
+| 3 | `.epub` or `.txt` **file** | chapters are extracted exactly like the web admin (cover/TOC pages skipped, `Chapter 12` numbering detected). Max 20 MB (Telegram limit) |
+
+Commands: `/status` draft preview · `/new` start another novel · `/cancel` · `/list` · `/id`.
+If a novel with the same title already exists the chapters are **appended** to it (send more
+`.epub` files one after another for multi-volume books).
+
+Local test: `TELEGRAM_BOT_TOKEN=... npm run dev`.
 
 ## Managing admins (owner only)
 
@@ -135,7 +173,9 @@ npm run dev          # http://localhost:3000  (admin: admin.html?dev=dev)
 ## Structure
 
 ```
-server.js            Node backend + static file server
+server.js            Node backend + static file server (+ starts Telegram bot when TELEGRAM_BOT_TOKEN set)
+lib/bot.js           Telegram upload bot (long polling, photo → details → epub)
+lib/epub.js          Zero-dependency EPUB parser (ZIP + XHTML → chapters) used by the bot
 js/skeleton.js       Sync skeleton painter – fills #siteHeader + every [data-sk] before data arrives (window.SK)
 js/config.js         Firebase config, owner email(s), API base
 js/data.js           API client (window.DB)
