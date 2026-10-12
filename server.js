@@ -180,6 +180,41 @@ function sanitizeNovel(body, existing) {
   return n;
 }
 
+/* ---------- shared write operations (used by HTTP API + Telegram bot) ---------- */
+function createNovel(body) {
+  const n = sanitizeNovel(body);
+  let s = slugify(body.slug || n.title) || "novel"; let base = s, i = 2; while (bySlug(s)) s = `${base}-${i++}`;
+  Object.assign(n, { slug: s, chapters: 0, views: 0, votes: 0, latest: null, createdAt: Date.now(), updatedAt: Date.now() });
+  n.rating = n.rating || 0; n.genres = n.genres && n.genres.length ? n.genres : ["Fantasy"]; n.lang = n.lang || "English Novel"; n.status = n.status || "Ongoing"; n.summary = n.summary || [];
+  catalog.unshift(n); fs.mkdirSync(chapDir(s), { recursive: true }); saveCatalog();
+  return n;
+}
+async function addChapters(n, list) {
+  const slug = n.slug;
+  const idx = await chapterIndex(slug); let next = idx.length ? idx[idx.length - 1].num + 1 : 1;
+  const saved = [];
+  await fsp.mkdir(chapDir(slug), { recursive: true });
+  for (const ch of list) {
+    const cn = safeNum(ch.num) || next++; if (cn >= next) next = cn + 1;
+    const title = String(ch.title || `Chapter ${cn}`).trim().slice(0, 300);
+    const paras = Array.isArray(ch.body) ? ch.body.map(String) : splitParas(ch.body);
+    if (!paras.length) continue;
+    const date = new Date().toISOString();
+    await fsp.writeFile(chapFile(slug, cn), JSON.stringify({ num: cn, title, date, body: paras }));
+    await updateIndex(slug, cn, title, date);
+    saved.push({ num: cn, title });
+  }
+  await refreshNovelStats(n);
+  return { saved, chapters: n.chapters };
+}
+async function saveImage(buf, ct) {
+  const ext = { "image/png": ".png", "image/jpeg": ".jpg", "image/jpg": ".jpg", "image/webp": ".webp", "image/gif": ".gif" }[String(ct || "").split(";")[0]];
+  if (!ext) throw Object.assign(new Error("Only png/jpg/webp/gif"), { status: 400 });
+  const name = crypto.randomBytes(8).toString("hex") + ext;
+  await fsp.writeFile(path.join(UPLOADS, name), buf);
+  return "/uploads/" + name;
+}
+
 /* ---------- router ---------- */
 async function handle(req, res) {
   const url = new URL(req.url, "http://x");
@@ -229,12 +264,7 @@ async function handle(req, res) {
       if (!slug && req.method === "POST") {
         await requireAdmin(req);
         const body = await readJSON(req, 2 * 1024 * 1024);
-        const n = sanitizeNovel(body);
-        let s = slugify(body.slug || n.title) || "novel"; let base = s, i = 2; while (bySlug(s)) s = `${base}-${i++}`;
-        Object.assign(n, { slug: s, chapters: 0, views: 0, votes: 0, latest: null, createdAt: Date.now(), updatedAt: Date.now() });
-        n.rating = n.rating || 0; n.genres = n.genres && n.genres.length ? n.genres : ["Fantasy"]; n.lang = n.lang || "English Novel"; n.status = n.status || "Ongoing"; n.summary = n.summary || [];
-        catalog.unshift(n); await fsp.mkdir(chapDir(s), { recursive: true }); saveCatalog();
-        return send(res, 201, n);
+        return send(res, 201, createNovel(body));
       }
       const n = slug && bySlug(slug);
       if (!n) return send(res, 404, { error: "Novel not found" });
@@ -251,21 +281,7 @@ async function handle(req, res) {
           await requireAdmin(req);
           const body = await readJSON(req, 60 * 1024 * 1024);
           const list = Array.isArray(body.chapters) ? body.chapters : [body];
-          const idx = await chapterIndex(slug); let next = idx.length ? idx[idx.length - 1].num + 1 : 1;
-          const saved = [];
-          await fsp.mkdir(chapDir(slug), { recursive: true });
-          for (const ch of list) {
-            const cn = safeNum(ch.num) || next++; if (cn >= next) next = cn + 1;
-            const title = String(ch.title || `Chapter ${cn}`).trim().slice(0, 300);
-            const paras = Array.isArray(ch.body) ? ch.body.map(String) : splitParas(ch.body);
-            if (!paras.length) continue;
-            const date = new Date().toISOString();
-            await fsp.writeFile(chapFile(slug, cn), JSON.stringify({ num: cn, title, date, body: paras }));
-            await updateIndex(slug, cn, title, date);
-            saved.push({ num: cn, title });
-          }
-          await refreshNovelStats(n);
-          return send(res, 201, { saved, chapters: n.chapters });
+          return send(res, 201, await addChapters(n, list));
         }
         const cn = safeNum(num); if (!cn) return send(res, 400, { error: "Bad chapter number" });
         if (req.method === "GET") {
@@ -289,12 +305,8 @@ async function handle(req, res) {
     // cover image upload (raw bytes, Content-Type image/*) -> /uploads/<id>.<ext>
     if (seg[1] === "upload" && req.method === "POST") {
       await requireAdmin(req);
-      const ct = req.headers["content-type"] || ""; const ext = { "image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp", "image/gif": ".gif" }[ct.split(";")[0]];
-      if (!ext) return send(res, 400, { error: "Only png/jpg/webp/gif" });
       const buf = await readBody(req, 5 * 1024 * 1024);
-      const name = crypto.randomBytes(8).toString("hex") + ext;
-      await fsp.writeFile(path.join(UPLOADS, name), buf);
-      return send(res, 201, { url: "/uploads/" + name });
+      return send(res, 201, { url: await saveImage(buf, req.headers["content-type"]) });
     }
     // full backup (tar-less: single JSON with everything) – admin only
     if (seg[1] === "backup" && req.method === "GET") {
@@ -329,3 +341,25 @@ async function handle(req, res) {
 http.createServer((req, res) => {
   handle(req, res).catch(e => { if (!res.headersSent) send(res, e.status || 500, { error: e.message || "Server error" }); else res.end(); if (!e.status) console.error(e); });
 }).listen(PORT, "0.0.0.0", () => console.log(`Novelxplin server on http://0.0.0.0:${PORT}  (owner: ${OWNERS.join(", ")}; extra admins: ${extraAdmins.length})`));
+
+/* ---------- Telegram upload bot (optional; enabled when TELEGRAM_BOT_TOKEN is set) ---------- */
+if (process.env.TELEGRAM_BOT_TOKEN) {
+  const { startBot } = require("./lib/bot");
+  startBot({
+    token: process.env.TELEGRAM_BOT_TOKEN,
+    adminIds: process.env.TELEGRAM_ADMIN_IDS || "",
+    author: process.env.BOT_AUTHOR || "Nitesh",
+    siteUrl: (process.env.SITE_URL || `http://localhost:${PORT}`).replace(/\/$/, ""),
+    dataDir: DATA,
+    api: {
+      list: async () => catalog,
+      getNovel: async slug => bySlug(slug) || null,
+      findByTitle: async title => catalog.find(n => n.title.toLowerCase() === String(title).toLowerCase()) || null,
+      createNovel: async body => createNovel(body),
+      updateNovel: async (slug, body) => { const n = bySlug(slug); if (!n) throw new Error("Novel not found"); sanitizeNovel(Object.assign({ title: n.title }, body), n); n.updatedAt = Date.now(); saveCatalog(); return n; },
+      chapterIndex,
+      addChapters: async (slug, list) => { const n = bySlug(slug); if (!n) throw new Error("Novel not found"); return addChapters(n, list); },
+      saveImage,
+    },
+  });
+} else console.log("Telegram bot disabled (set TELEGRAM_BOT_TOKEN to enable)");

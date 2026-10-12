@@ -36,6 +36,10 @@ User=$USER
 WorkingDirectory=$APP_DIR
 Environment=PORT=$PORT
 Environment=NODE_ENV=production
+# Telegram upload bot (optional): fill in and run  sudo systemctl daemon-reload && sudo systemctl restart novelxplin
+Environment=TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+Environment=TELEGRAM_ADMIN_IDS=${TELEGRAM_ADMIN_IDS:-}
+Environment=SITE_URL=${SITE_URL:-http://$(curl -s ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')}
 ExecStart=/usr/bin/node $APP_DIR/server.js
 Restart=always
 RestartSec=3
