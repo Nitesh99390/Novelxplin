@@ -6,42 +6,43 @@
   <title>Search - Novelxplin</title>
   <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Roboto+Condensed:wght@400;700&display=swap" rel="stylesheet">
   <link rel="icon" type="image/svg+xml" href="img/favicon.svg">
-  <link rel="stylesheet" href="css/style.css?v=20261012a">
+  <link rel="stylesheet" href="css/style.css?v=20261012b">
 </head>
 <body>
   <div id="siteHeader"></div>
   <main class="page">
     <div class="wrap">
-      <div id="crumb"></div>
+      <div id="crumb" data-sk="crumb"></div>
       <div class="grid-2">
         <div>
           <section class="panel">
-            <div class="panel-head"><h2 id="title"></h2><span class="more" id="count" style="color:var(--muted)"></span></div>
-            <div class="tabs" id="tabs"></div>
-            <div class="novel-grid" id="grid"></div>
+            <div class="panel-head"><h2 id="title" data-sk="title"></h2><span class="more" id="count" style="color:var(--muted)"></span></div>
+            <div class="tabs" id="tabs" data-sk="tabs"></div>
+            <div class="novel-grid" id="grid" data-sk="grid:8"></div>
             <div id="pager"></div>
           </section>
         </div>
         <aside class="sidebar-stack">
           <section class="panel">
-            <div class="panel-head"><h2 id="gTitle"></h2></div>
-            <div id="genres"></div>
+            <div class="panel-head"><h2 id="gTitle" data-sk="title"></h2></div>
+            <div id="genres" data-sk="genres"></div>
           </section>
           <section class="panel">
-            <div class="panel-head"><h2 id="rTitle"></h2></div>
-            <div id="ranking"></div>
+            <div class="panel-head"><h2 id="rTitle" data-sk="title"></h2></div>
+            <div id="ranking" data-sk="rank:10"></div>
           </section>
         </aside>
       </div>
     </div>
   </main>
   <div id="siteFooter"></div>
+  <script src="js/skeleton.js?v=20261012b"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
-  <script src="js/config.js?v=20261012a"></script>
-  <script src="js/data.js?v=20261012a"></script>
-  <script src="js/app.js?v=20261012a"></script>
+  <script src="js/config.js?v=20261012b"></script>
+  <script src="js/data.js?v=20261012b"></script>
+  <script src="js/app.js?v=20261012b"></script>
   <script>
     document.addEventListener("app:ready", () => {
       const { $, esc, q, nCard, genreGrid, rankList, pagination, breadcrumb, I } = UI;

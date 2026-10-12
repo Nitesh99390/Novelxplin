@@ -289,5 +289,13 @@
     tt?.addEventListener("click", () => scrollTo({ top: 0, behavior: "smooth" }));
 
     document.dispatchEvent(new CustomEvent("app:ready"));
+
+    // Skeleton failsafe: page scripts replace each data-sk container when their data
+    // arrives. If something throws (or a container has no renderer) the shimmer must
+    // not stay forever – freeze it shortly after ready and wipe it a bit later.
+    if (window.SK) {
+      setTimeout(() => $$("[data-sk]").forEach(el => el.querySelector(".sk") && el.classList.add("sk-stale")), 6000);
+      setTimeout(() => SK.clear(), 12000);
+    }
   });
 })();

@@ -89,6 +89,24 @@ Admin requests send `Authorization: Bearer <Firebase ID token>`; the server veri
 RS256 signature against Google's public certs and checks the email against `ADMIN_EMAILS`.
 For local dev without Firebase: `ADMIN_DEV_TOKEN=dev node server.js` and open `admin.html?dev=dev`.
 
+## Loading skeletons
+
+Every page loads `js/skeleton.js` **first** (before Firebase). It synchronously paints grey
+shimmer placeholders into `#siteHeader` and into any element tagged `data-sk="<type>[:count]"`,
+so nothing is blank while the catalog / auth requests are in flight. Page scripts simply
+overwrite `innerHTML` when real data arrives.
+
+| `data-sk` type | Used for |
+|---|---|
+| `featured`, `release:n`, `grid:n`, `rank:n`, `lib:n`, `genres` | Home / list panels |
+| `novelhead`, `summary`, `chapters:n`, `crumb` | Novel detail |
+| `nav`, `reader:n` | Reader navigation + chapter body |
+| `tabs`, `filter`, `filter-opts:n`, `title`, `text:n` | Misc panels |
+
+`window.SK.html(type, n)` returns the markup for async sections (chapter list, reader body);
+`SK.clear()` removes leftovers in "not found" branches. A failsafe in `app.js` freezes the
+shimmer 6 s after `app:ready` and wipes any remaining skeleton at 12 s.
+
 ## Local dev
 
 ```bash
@@ -99,6 +117,7 @@ npm run dev          # http://localhost:3000  (admin: admin.html?dev=dev)
 
 ```
 server.js            Node backend + static file server
+js/skeleton.js       Sync skeleton painter – fills #siteHeader + every [data-sk] before data arrives (window.SK)
 js/config.js         Firebase config, admin emails, API base
 js/data.js           API client (window.DB)
 js/app.js            Shared UI, Firebase Auth, Lib/Auth sync (window.Lib / window.Auth)

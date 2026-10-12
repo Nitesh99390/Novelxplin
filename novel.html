@@ -6,58 +6,59 @@
   <title>Novel - Novelxplin</title>
   <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Roboto+Condensed:wght@400;700&display=swap" rel="stylesheet">
   <link rel="icon" type="image/svg+xml" href="img/favicon.svg">
-  <link rel="stylesheet" href="css/style.css?v=20261012a">
+  <link rel="stylesheet" href="css/style.css?v=20261012b">
 </head>
 <body>
   <div id="siteHeader"></div>
   <main class="page">
     <div class="wrap">
-      <div id="crumb"></div>
+      <div id="crumb" data-sk="crumb"></div>
       <div class="grid-2">
         <div style="display:flex;flex-direction:column;gap:14px">
-          <section class="panel" id="head"></section>
+          <section class="panel" id="head" data-sk="novelhead"></section>
           <section class="panel">
-            <div class="panel-head"><h2 id="sTitle"></h2></div>
-            <div class="summary collapsed" id="summary"></div>
+            <div class="panel-head"><h2 id="sTitle" data-sk="title"></h2></div>
+            <div class="summary collapsed" id="summary" data-sk="summary"></div>
             <a href="#" class="toggle-summary" id="toggleSummary">Show more</a>
           </section>
           <section class="panel">
             <div class="panel-head">
-              <h2 id="cTitle"></h2>
+              <h2 id="cTitle" data-sk="title"></h2>
               <div class="chapter-tools">
                 <input type="text" id="chapSearch" placeholder="Find chapter...">
                 <select id="chapRange"></select>
               </div>
             </div>
-            <div class="chapter-list" id="chapters"></div>
+            <div class="chapter-list" id="chapters" data-sk="chapters:20"></div>
             <div id="chapPager"></div>
           </section>
         </div>
         <aside class="sidebar-stack">
           <section class="panel">
-            <div class="panel-head"><h2 id="relTitle"></h2></div>
-            <div id="related"></div>
+            <div class="panel-head"><h2 id="relTitle" data-sk="title"></h2></div>
+            <div id="related" data-sk="rank:8"></div>
           </section>
           <section class="panel">
-            <div class="panel-head"><h2 id="gTitle"></h2></div>
-            <div id="genres"></div>
+            <div class="panel-head"><h2 id="gTitle" data-sk="title"></h2></div>
+            <div id="genres" data-sk="genres"></div>
           </section>
         </aside>
       </div>
     </div>
   </main>
   <div id="siteFooter"></div>
+  <script src="js/skeleton.js?v=20261012b"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
-  <script src="js/config.js?v=20261012a"></script>
-  <script src="js/data.js?v=20261012a"></script>
-  <script src="js/app.js?v=20261012a"></script>
+  <script src="js/config.js?v=20261012b"></script>
+  <script src="js/data.js?v=20261012b"></script>
+  <script src="js/app.js?v=20261012b"></script>
   <script>
     document.addEventListener("app:ready", async () => {
       const { $, esc, q, stars, nCard, genreGrid, rankList, pagination, breadcrumb, I } = UI;
       const n = DB.get(q.get("n"));
-      if (!n) { $("#head").innerHTML = `<div class="empty">${I.search}<div>Novel not found.</div></div>`; return; }
+      if (!n) { SK.clear(); $("#head").innerHTML = `<div class="empty">${I.search}<div>Novel not found.</div></div>`; return; }
       document.title = `${n.title} - Novelxplin`;
       const PER = 50;
       const hist = Lib.history()[n.id];
@@ -98,7 +99,7 @@
       $("#toggleSummary").addEventListener("click", e => { e.preventDefault(); const s = $("#summary"); s.classList.toggle("collapsed"); e.target.textContent = s.classList.contains("collapsed") ? "Show more" : "Show less"; });
 
       $("#cTitle").innerHTML = `${I.list} Chapters <span style="color:var(--muted);font-weight:400;font-size:12px;margin-left:4px">(${n.chapters})</span>`;
-      $("#chapters").innerHTML = `<div class="empty" style="grid-column:1/-1">Loading chapters…</div>`;
+      $("#chapters").innerHTML = SK.html("chapters", 20);
       let all = [];
       try { all = await DB.chapters(n.slug); } catch (e) { $("#chapters").innerHTML = `<div class="empty" style="grid-column:1/-1">Failed to load chapters.</div>`; }
       const pages = Math.max(1, Math.ceil(all.length / PER));
