@@ -6,18 +6,18 @@
   <title>Read - Novelxplin</title>
   <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Roboto+Condensed:wght@400;700&display=swap" rel="stylesheet">
   <link rel="icon" type="image/svg+xml" href="img/favicon.svg">
-  <link rel="stylesheet" href="css/style.css?v=20261012a">
+  <link rel="stylesheet" href="css/style.css?v=20261012b">
 </head>
 <body class="reader-page">
   <div id="siteHeader"></div>
   <div class="reader-top"><div class="wrap">
     <a href="index.html" title="Home"></a>
-    <span class="novel-title truncate" id="rtTitle"></span>
+    <span class="novel-title truncate" id="rtTitle" data-sk="title"></span>
     <a class="btn ghost" href="#" id="rtLib"></a>
   </div></div>
 
   <main class="reader-wrap">
-    <div class="reader-nav" id="navTop"></div>
+    <div class="reader-nav" id="navTop" data-sk="nav"></div>
 
     <div class="reader-settings" id="settings">
       <div class="grp"><label>Theme</label>
@@ -31,31 +31,32 @@
       <div class="grp"><label>Line height</label><button data-lh="1.6">1.6</button><button data-lh="1.8">1.8</button><button data-lh="2.1">2.1</button></div>
     </div>
 
-    <article class="chapter-content" id="content"></article>
+    <article class="chapter-content" id="content" data-sk="reader:4"></article>
 
-    <div class="reader-nav" id="navBottom"></div>
+    <div class="reader-nav" id="navBottom" data-sk="nav"></div>
 
     <section class="comment-box">
       <h3>Comments</h3>
       <textarea placeholder="Share your thoughts about this chapter..." id="cText"></textarea>
       <div style="display:flex;justify-content:flex-end;margin-top:8px"><button class="btn" id="cPost">Post comment</button></div>
-      <div id="comments"></div>
+      <div id="comments" data-sk="text:2"></div>
     </section>
   </main>
 
   <div id="siteFooter"></div>
+  <script src="js/skeleton.js?v=20261012b"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
-  <script src="js/config.js?v=20261012a"></script>
-  <script src="js/data.js?v=20261012a"></script>
-  <script src="js/app.js?v=20261012a"></script>
+  <script src="js/config.js?v=20261012b"></script>
+  <script src="js/data.js?v=20261012b"></script>
+  <script src="js/app.js?v=20261012b"></script>
   <script>
     document.addEventListener("app:ready", async () => {
       const { $, $$, esc, q, I } = UI;
       const n = DB.get(q.get("n"));
       const c = Math.max(1, parseInt(q.get("c") || "1", 10));
-      if (!n || c > n.chapters) { $("#content").innerHTML = `<div class="empty">${I.search}<div>Chapter not found.</div></div>`; return; }
+      if (!n || c > n.chapters) { SK.clear(); $("#content").innerHTML = `<div class="empty">${I.search}<div>Chapter not found.</div></div>`; return; }
       Lib.mark(n.id, c);
 
       $(".reader-top a[title=Home]").innerHTML = I.home;
@@ -81,7 +82,7 @@
       }
       $("#navTop").innerHTML = nav(); $("#navBottom").innerHTML = nav();
 
-      $("#content").innerHTML = `<h1>${esc(title)}</h1><div class="sub">Loading…</div>`;
+      $("#content").innerHTML = SK.html("reader", 4);
       try {
         const ch = await DB.chapter(n.slug, c);
         const body = Array.isArray(ch.body) ? ch.body : String(ch.body || "").split(/\n{2,}|\n/).filter(Boolean);
@@ -124,7 +125,7 @@
       const col = window.firebase && Auth.enabled ? firebase.firestore().collection("comments").doc(n.slug).collection(String(c)) : null;
       const show = list => $("#comments").innerHTML = list.length ? list.map((cm, i) => `<div class="comment"><div class="avatar" style="background:${colors[i % colors.length]}">${esc((cm.who || "?")[0])}</div><div><div class="who">${esc(cm.who)}<small>${DB.timeAgo(Math.round((Date.now() - cm.at) / 6e4))}</small></div><p>${esc(cm.text)}</p></div></div>`).join("") : `<p style="color:var(--muted);font-size:12px;margin-top:10px">No comments yet. Be the first!</p>`;
       async function renderComments() {
-        if (col) { try { const s = await col.orderBy("at", "desc").limit(50).get(); return show(s.docs.map(d => d.data())); } catch (e) { console.warn(e); } }
+        if (col) { try { const s = await Promise.race([col.orderBy("at", "desc").limit(50).get(), new Promise((_, rej) => setTimeout(() => rej(new Error("comments timeout")), 8000))]); return show(s.docs.map(d => d.data())); } catch (e) { console.warn(e); } }
         show(JSON.parse(localStorage.getItem(key) || "[]"));
       }
       $("#cPost").addEventListener("click", async () => {

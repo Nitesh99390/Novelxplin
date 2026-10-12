@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Roboto+Condensed:wght@400;700&display=swap" rel="stylesheet">
   <link rel="icon" type="image/svg+xml" href="img/favicon.svg">
-  <link rel="stylesheet" href="css/style.css?v=20261012a">
+  <link rel="stylesheet" href="css/style.css?v=20261012b">
 </head>
 <body>
   <div id="siteHeader"></div>
@@ -16,24 +16,24 @@
   <main class="page">
     <div class="wrap">
       <!-- Featured -->
-      <section class="featured" id="featured"></section>
+      <section class="featured" id="featured" data-sk="featured"></section>
 
       <div class="grid-2">
         <div>
           <section class="panel">
-            <div class="panel-head"><h2 id="lrTitle"></h2><a class="more" href="list.html?sort=latest-release">See more</a></div>
-            <ul class="release-list" id="latestRelease"></ul>
+            <div class="panel-head"><h2 id="lrTitle" data-sk="title"></h2><a class="more" href="list.html?sort=latest-release">See more</a></div>
+            <ul class="release-list" id="latestRelease" data-sk="release:14"></ul>
           </section>
         </div>
         <aside class="sidebar-stack">
           <section class="panel">
-            <div class="panel-head"><h2 id="gTitle"></h2></div>
-            <div id="genres"></div>
+            <div class="panel-head"><h2 id="gTitle" data-sk="title"></h2></div>
+            <div id="genres" data-sk="genres"></div>
             <a class="see-more" href="list.html?sort=most-popular">See more</a>
           </section>
           <section class="panel">
-            <div class="panel-head"><h2 id="rTitle"></h2><a class="more" href="list.html?sort=most-popular">See more</a></div>
-            <div id="ranking"></div>
+            <div class="panel-head"><h2 id="rTitle" data-sk="title"></h2><a class="more" href="list.html?sort=most-popular">See more</a></div>
+            <div id="ranking" data-sk="rank:8"></div>
           </section>
         </aside>
       </div>
@@ -41,18 +41,18 @@
       <div class="grid-2" style="margin-top:14px">
         <div style="display:flex;flex-direction:column;gap:14px">
           <section class="panel">
-            <div class="panel-head"><h2 id="lnTitle"></h2><a class="more" href="list.html?sort=latest-novel">See more</a></div>
-            <div class="novel-grid" id="latestNovels"></div>
+            <div class="panel-head"><h2 id="lnTitle" data-sk="title"></h2><a class="more" href="list.html?sort=latest-novel">See more</a></div>
+            <div class="novel-grid" id="latestNovels" data-sk="grid:6"></div>
           </section>
           <section class="panel">
-            <div class="panel-head"><h2 id="cTitle"></h2><a class="more" href="list.html?sort=completed">See more</a></div>
-            <div class="novel-grid" id="completed"></div>
+            <div class="panel-head"><h2 id="cTitle" data-sk="title"></h2><a class="more" href="list.html?sort=completed">See more</a></div>
+            <div class="novel-grid" id="completed" data-sk="grid:6"></div>
           </section>
         </div>
         <aside class="sidebar-stack">
           <section class="panel">
-            <div class="panel-head"><h2 id="hTitle"></h2><a class="more" href="library.html">Library</a></div>
-            <div id="history"></div>
+            <div class="panel-head"><h2 id="hTitle" data-sk="title"></h2><a class="more" href="library.html">Library</a></div>
+            <div id="history" data-sk="lib:3"></div>
           </section>
         </aside>
       </div>
@@ -61,12 +61,13 @@
 
   <div id="siteFooter"></div>
 
+  <script src="js/skeleton.js?v=20261012b"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
-  <script src="js/config.js?v=20261012a"></script>
-  <script src="js/data.js?v=20261012a"></script>
-  <script src="js/app.js?v=20261012a"></script>
+  <script src="js/config.js?v=20261012b"></script>
+  <script src="js/data.js?v=20261012b"></script>
+  <script src="js/app.js?v=20261012b"></script>
   <script>
     document.addEventListener("app:ready", () => {
       const { $, esc, cover, stars, metaLines, nCard, releaseRow, rankList, genreGrid, I } = UI;

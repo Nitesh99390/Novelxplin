@@ -435,3 +435,68 @@ body.reader-page.theme-light { background: #ffffff; }
 .admin-btn { margin-left: 6px; background: var(--accent); color: #fff; border-color: var(--accent); }
 .admin-btn:hover { filter: brightness(1.08); }
 .btn.disabled, .btn:disabled { opacity: .5; pointer-events: none; }
+
+/* ---------- Skeleton loading (shown until app:ready / data arrives) ---------- */
+.sk { position: relative; overflow: hidden; background: #e6e9ed; border-radius: 3px; display: block; }
+.sk::after { content: ""; position: absolute; inset: 0; transform: translateX(-100%); background: linear-gradient(90deg, transparent, rgba(255, 255, 255, .65), transparent); animation: sk-shimmer 1.4s infinite; }
+@keyframes sk-shimmer { to { transform: translateX(100%); } }
+.sk-line { height: 11px; width: 100%; margin: 4px 0; }
+.sk-line.w90 { width: 90%; } .sk-line.w75 { width: 75%; } .sk-line.w60 { width: 60%; } .sk-line.w45 { width: 45%; } .sk-line.w30 { width: 30%; } .sk-line.w20 { width: 20%; }
+.sk-line.lg { height: 15px; } .sk-line.xl { height: 22px; } .sk-line.sm { height: 9px; }
+.sk-cover { aspect-ratio: 3 / 4; width: 100%; }
+.sk-circle { border-radius: 50%; }
+.sk-btn { height: 34px; width: 120px; border-radius: 3px; }
+.sk-chip { height: 18px; width: 54px; margin-top: 8px; }
+.sk-title { height: 12px; width: 140px; }
+/* skeletons sitting on the dark header / footer */
+.sk-dark .sk { background: rgba(255, 255, 255, .12); }
+.sk-dark .sk::after { background: linear-gradient(90deg, transparent, rgba(255, 255, 255, .14), transparent); }
+.sk-header { background: var(--header); position: sticky; top: 0; z-index: 100; }
+.sk-header .wrap { display: flex; align-items: center; gap: 12px; height: 46px; }
+.sk-header .sk-logo { width: 110px; height: 26px; }
+.sk-header .sk-navi { width: 80px; height: 14px; }
+.sk-header .sk-search { width: 182px; height: 28px; margin-left: auto; }
+.sk-header .sk-user { width: 110px; height: 28px; }
+.sk-notice { background: #fff; border-bottom: 1px solid var(--border); }
+.sk-notice .wrap { display: flex; align-items: center; height: 30px; }
+.sk-notice .sk { width: 260px; height: 11px; }
+/* reader */
+.sk-reader { padding: 4px 0; }
+.sk-reader .sk-line { height: 13px; margin: 0 0 14px; }
+.theme-dark .sk { background: #333; }
+.theme-dark .sk::after { background: linear-gradient(90deg, transparent, rgba(255, 255, 255, .08), transparent); }
+.theme-sepia .sk { background: #e3d6bd; }
+/* layout-matching skeleton pieces */
+.sk-release li .sk-line { margin: 0; }
+.sk-rank .sk-num { width: 16px; height: 16px; margin: 0 auto; }
+.sk-chapters a { pointer-events: none; }
+.sk-chapters a .sk { margin: 0; }
+.sk-novel-head > .sk-cover { width: 200px; }
+.sk-novel-head .sk-btns { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px; }
+.sk-novel-head .info-row { border-bottom: 1px dashed #e3e6ea; }
+.sk-novel-head .info-row .sk { margin: 2px 0; }
+.sk-nav { display: flex; gap: 6px; justify-content: center; }
+.sk-nav .sk { height: 36px; }
+.sk-crumb { display: flex; gap: 8px; align-items: center; padding: 4px 0 14px; }
+.sk-crumb .sk { height: 10px; margin: 0; }
+.sk-tabs { display: flex; gap: 6px; padding: 10px 12px; border-bottom: 1px solid var(--border); }
+.sk-tabs .sk { height: 26px; width: 72px; margin: 0; }
+.sk-filter { padding: 12px; display: grid; gap: 12px; }
+.sk-filter .row { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 8px; }
+.sk-filter .opts { display: flex; flex-wrap: wrap; gap: 5px; }
+.sk-filter .opts .sk { height: 24px; width: 64px; margin: 0; }
+.sk-stale .sk::after { animation: none; }
+.sk-msearch { display: none; padding: 8px 12px; background: var(--header-2); }
+.sk-msearch .sk { height: 34px; width: 100%; }
+@media (max-width: 900px) { .sk-novel-head > .sk-cover { width: 150px; } }
+@media (max-width: 720px) {
+  .sk-header .sk-navi, .sk-header .sk-search { display: none; }
+  .sk-header .sk-user { margin-left: auto; width: 90px; }
+  .sk-msearch { display: block; }
+  .sk-novel-head > .sk-cover { width: 160px; max-width: 100%; margin: 0 auto; }
+  .sk-nav { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+  .sk-nav .sk { height: 42px; width: 100% !important; }
+  .sk-nav .sk.sel { grid-column: 1 / -1; order: 1; }
+  .sk-filter .row { grid-template-columns: 1fr; }
+}
+@media (prefers-reduced-motion: reduce) { .sk::after { animation: none; } }
