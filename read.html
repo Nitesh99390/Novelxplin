@@ -6,7 +6,7 @@
   <title>Read - Novelxplin</title>
   <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Roboto+Condensed:wght@400;700&display=swap" rel="stylesheet">
   <link rel="icon" type="image/svg+xml" href="img/favicon.svg">
-  <link rel="stylesheet" href="css/style.css?v=20261012b">
+  <link rel="stylesheet" href="css/style.css?v=20261012c">
 </head>
 <body class="reader-page">
   <div id="siteHeader"></div>
@@ -14,12 +14,9 @@
     <a href="index.html" title="Home"></a>
     <span class="novel-title truncate" id="rtTitle" data-sk="title"></span>
     <a class="btn ghost" href="#" id="rtLib"></a>
-  </div></div>
-
-  <main class="reader-wrap">
-    <div class="reader-nav" id="navTop" data-sk="nav"></div>
-
-    <div class="reader-settings" id="settings">
+    <button class="btn ghost icon-btn" id="rtSettings" title="Reader settings" aria-label="Reader settings" aria-expanded="false"></button>
+    <div class="reader-settings" id="settings" role="dialog" aria-label="Reader settings" hidden>
+      <div class="rs-head"><strong>Reader settings</strong><button type="button" class="rs-close" id="rsClose" aria-label="Close">&times;</button></div>
       <div class="grp"><label>Theme</label>
         <button data-theme="paper" title="Paper"><span class="sw" style="background:#f4f1ea;border-color:#ccc"></span></button>
         <button data-theme="light" title="Light"><span class="sw" style="background:#fff;border-color:#ccc"></span></button>
@@ -30,6 +27,10 @@
       <div class="grp"><label>Font</label><button data-font="serif">Serif</button><button data-font="sans">Sans</button></div>
       <div class="grp"><label>Line height</label><button data-lh="1.6">1.6</button><button data-lh="1.8">1.8</button><button data-lh="2.1">2.1</button></div>
     </div>
+  </div></div>
+
+  <main class="reader-wrap">
+    <div class="reader-nav" id="navTop" data-sk="nav"></div>
 
     <article class="chapter-content" id="content" data-sk="reader:4"></article>
 
@@ -44,13 +45,13 @@
   </main>
 
   <div id="siteFooter"></div>
-  <script src="js/skeleton.js?v=20261012b"></script>
+  <script src="js/skeleton.js?v=20261012c"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
-  <script src="js/config.js?v=20261012b"></script>
-  <script src="js/data.js?v=20261012b"></script>
-  <script src="js/app.js?v=20261012b"></script>
+  <script src="js/config.js?v=20261012c"></script>
+  <script src="js/data.js?v=20261012c"></script>
+  <script src="js/app.js?v=20261012c"></script>
   <script>
     document.addEventListener("app:ready", async () => {
       const { $, $$, esc, q, I } = UI;
@@ -103,8 +104,17 @@
         $$("[data-lh]").forEach(b => b.classList.toggle("active", +b.dataset.lh === +prefs.lh));
         localStorage.setItem("nx_reader", JSON.stringify(prefs));
       }
+      // settings popover toggle (gear icon in top bar)
+      const panel = $("#settings"), gear = $("#rtSettings");
+      gear.innerHTML = I.gear;
+      const setOpen = (o) => { panel.hidden = !o; panel.classList.toggle("open", o); gear.classList.toggle("active", o); gear.setAttribute("aria-expanded", o); document.body.classList.toggle("rs-open", o); };
+      gear.addEventListener("click", e => { e.stopPropagation(); setOpen(panel.hidden); });
+      $("#rsClose").addEventListener("click", () => setOpen(false));
+      document.addEventListener("click", e => { if (!panel.hidden && !panel.contains(e.target) && !gear.contains(e.target)) setOpen(false); });
+      document.addEventListener("keydown", e => { if (e.key === "Escape" && !panel.hidden) setOpen(false); });
+
       $("#settings").addEventListener("click", e => {
-        const b = e.target.closest("button"); if (!b) return;
+        const b = e.target.closest("button"); if (!b || b.id === "rsClose") return;
         if (b.dataset.theme) prefs.theme = b.dataset.theme;
         if (b.dataset.size) prefs.size = Math.max(14, Math.min(28, prefs.size + +b.dataset.size));
         if (b.dataset.font) prefs.font = b.dataset.font;
