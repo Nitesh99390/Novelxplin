@@ -9,8 +9,12 @@ Frontend (static HTML/CSS/JS)  ──►  server.js (Node, zero deps) on Oracle 
          └──►  Firebase: Google login · Firestore (users/{uid}: library, history · comments)
 ```
 
-Admin = any Google account listed in `js/config.js → ADMIN_EMAILS`
-(currently **bhuimharniteshbhuimhar@gmail.com**). Admins see an **Admin** button in the header → `admin.html`.
+**Owner** = the Google account(s) listed in `js/config.js → ADMIN_EMAILS`
+(currently **bhuimharniteshbhuimhar@gmail.com**). The owner can add / remove **extra admins**
+from the admin panel (“Admins” box) – just type an email and confirm. Whoever signs in with
+Google using that email automatically gets the **Admin** button in the header → `admin.html`
+and can upload / edit / delete novels. Extra admins are stored in `data/admins.json`
+(included in backups); only the owner can manage the list.
 
 ## Pages
 
@@ -67,9 +71,23 @@ Memory footprint ≈ 50 MB RSS; chapters are streamed from disk, so 47 GB storag
 4. Or add/edit a single chapter manually. Delete / edit from the list.
 5. **Download full backup** → one `.json.gz` with every novel + chapter.
 
+## Managing admins (owner only)
+
+1. Sign in as the owner → **Admin** → right column **Admins** panel.
+2. Type the Gmail address → **+ Add** → confirm. Done – no code change or restart needed.
+3. That person signs in with Google (same email) and the Admin button appears automatically.
+4. Click **✕** next to an email → confirm to revoke access instantly (server rejects their token on the next request).
+
+The owner itself can never be removed from the panel. Extra admins **cannot** add or remove
+other admins – the `/api/admins` routes require the owner's token.
+
 ## API (server.js)
 
 ```
+GET    /api/me                     (admin)  {email, admin, owner}
+GET    /api/admins                 (owner)  {owners:[...], admins:[{email,addedBy,addedAt}]}
+POST   /api/admins                 (owner)  {email} → add admin
+DELETE /api/admins/:email          (owner)  remove admin
 GET    /api/novels                          catalog
 GET    /api/novels/:slug                    one novel
 GET    /api/novels/:slug/chapters           [{num,title,date}]
@@ -86,7 +104,8 @@ GET    /api/health
 ```
 
 Admin requests send `Authorization: Bearer <Firebase ID token>`; the server verifies the
-RS256 signature against Google's public certs and checks the email against `ADMIN_EMAILS`.
+RS256 signature against Google's public certs and checks the email against `ADMIN_EMAILS`
+(owners) **or** `data/admins.json` (extra admins added from the panel).
 For local dev without Firebase: `ADMIN_DEV_TOKEN=dev node server.js` and open `admin.html?dev=dev`.
 
 ## Loading skeletons
@@ -118,12 +137,12 @@ npm run dev          # http://localhost:3000  (admin: admin.html?dev=dev)
 ```
 server.js            Node backend + static file server
 js/skeleton.js       Sync skeleton painter – fills #siteHeader + every [data-sk] before data arrives (window.SK)
-js/config.js         Firebase config, admin emails, API base
+js/config.js         Firebase config, owner email(s), API base
 js/data.js           API client (window.DB)
 js/app.js            Shared UI, Firebase Auth, Lib/Auth sync (window.Lib / window.Auth)
 css/style.css
 admin.html           Admin panel
 firestore.rules      Firestore security rules
 deploy/setup-oracle.sh, deploy/backup.sh
-data/                (created at runtime) catalog.json, chapters/<slug>/<n>.json, uploads/
+data/                (created at runtime) catalog.json, admins.json, chapters/<slug>/<n>.json, uploads/
 ```

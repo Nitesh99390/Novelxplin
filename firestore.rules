@@ -1,9 +1,24 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    // Site owner (same as ADMIN_EMAILS in js/config.js)
+    function isOwner() {
+      return request.auth != null && request.auth.token.email == "bhuimharniteshbhuimhar@gmail.com";
+    }
+    // Extra admins: owner mirrors data/admins.json into admins/{email} from the admin panel
+    function isAdmin() {
+      return isOwner() || (request.auth != null
+        && exists(/databases/$(database)/documents/admins/$(request.auth.token.email)));
+    }
+
     // Each user owns exactly one doc: library, history, profile
     match /users/{uid} {
       allow read, write: if request.auth != null && request.auth.uid == uid;
+    }
+    // Admin list – readable by signed-in users, writable only by the owner
+    match /admins/{email} {
+      allow read: if request.auth != null;
+      allow write: if isOwner();
     }
     // Chapter comments: anyone can read, signed-in users can post their own
     match /comments/{novel}/{chapter}/{id} {
@@ -13,8 +28,7 @@ service cloud.firestore {
         && request.resource.data.text is string
         && request.resource.data.text.size() <= 2000;
       allow update, delete: if request.auth != null
-        && (resource.data.uid == request.auth.uid
-            || request.auth.token.email == "bhuimharniteshbhuimhar@gmail.com");
+        && (resource.data.uid == request.auth.uid || isAdmin());
     }
   }
 }

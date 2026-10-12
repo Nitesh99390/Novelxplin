@@ -7,7 +7,7 @@
   <meta name="robots" content="noindex">
   <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Roboto+Condensed:wght@400;700&display=swap" rel="stylesheet">
   <link rel="icon" type="image/svg+xml" href="img/favicon.svg">
-  <link rel="stylesheet" href="css/style.css?v=20261012c">
+  <link rel="stylesheet" href="css/style.css?v=20261012d">
   <style>
     #panelWrap > div, #panelWrap > aside, .panel { min-width: 0; }
     .panel > .adm-form, .panel > .btn-row, .panel > .hint, .panel > #filter, .panel > .adm-list { margin-left: 12px; margin-right: 12px; }
@@ -54,6 +54,12 @@
     .danger { color: #c0392b !important; }
     .cover-prev { width: 70px; height: 95px; object-fit: cover; border-radius: 3px; border: 1px solid var(--line); background: #eee; flex-shrink: 0; }
     .btn-row .btn { flex: 1 1 auto; justify-content: center; }
+    .adm-admins .row .t b { font-weight: 500; }
+    .adm-admins .row .pill.owner { background: #fff1e6; color: var(--accent); }
+    .add-admin { display: flex; gap: 8px; margin-top: 10px; }
+    .add-admin input { flex: 1; min-width: 0; font: inherit; padding: 8px 10px; border: 1px solid var(--line); border-radius: 4px; font-size: 14px; }
+    .add-admin input:focus { outline: 0; border-color: var(--accent); box-shadow: 0 0 0 2px rgba(240,118,26,.15); }
+    .add-admin .btn { flex: 0 0 auto; }
     @media (max-width: 700px) {
       .adm-form .two { grid-template-columns: 1fr; }
       .adm-form input, .adm-form textarea, .adm-form select { font-size: 16px; } /* prevent iOS zoom */
@@ -124,6 +130,15 @@
             <input type="text" id="filter" placeholder="Filter novels…" style="padding:7px 10px;border:1px solid var(--line);border-radius:4px;margin-bottom:8px;font:inherit">
             <div class="adm-list" id="novelList"></div>
           </section>
+          <section class="panel" id="adminsPanel" style="display:none">
+            <div class="panel-head"><h2 id="aTitle"></h2><span class="more" id="aCount" style="color:var(--muted)"></span></div>
+            <p class="hint" style="margin:10px 12px 0">Anyone who signs in with Google using one of these emails gets the Admin panel and can upload novels. Only you (the owner) can add or remove admins.</p>
+            <form class="add-admin" id="addAdminForm" style="margin-left:12px;margin-right:12px">
+              <input type="email" name="email" placeholder="new-admin@gmail.com" required autocomplete="off">
+              <button class="btn" type="submit">+ Add</button>
+            </form>
+            <div class="adm-list adm-admins" id="adminList" style="margin:10px 12px 12px"></div>
+          </section>
           <section class="panel">
             <div class="panel-head"><h2 id="tTitle"></h2></div>
             <div class="btn-row"><a class="btn ghost" href="#" id="backupBtn">⬇ Download full backup</a></div>
@@ -135,14 +150,14 @@
   </main>
   <div id="siteFooter"></div>
 
-  <script src="js/skeleton.js?v=20261012c"></script>
+  <script src="js/skeleton.js?v=20261012d"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
-  <script src="js/config.js?v=20261012c"></script>
-  <script src="js/data.js?v=20261012c"></script>
-  <script src="js/app.js?v=20261012c"></script>
+  <script src="js/config.js?v=20261012d"></script>
+  <script src="js/data.js?v=20261012d"></script>
+  <script src="js/app.js?v=20261012d"></script>
   <script>
     document.addEventListener("app:ready", async () => {
       const { $, $$, esc, q, breadcrumb, I } = UI;
@@ -151,7 +166,7 @@
       const user = Auth.user();
       const devToken = new URLSearchParams(location.search).get("dev");
       if (!devToken && (!user || !Auth.isAdmin())) {
-        gate.style.display = ""; gate.innerHTML = `<div class="empty">${I.user}<div>${user ? `Signed in as <b>${esc(user.email)}</b> – this account is not an admin.` : "Admin area. Please sign in with the admin Google account."}<br><br>${user ? `<a href="#" id="gOut" style="color:var(--link)">Sign out</a>` : `<button class="btn" id="gIn">${I.user} Sign in</button>`}</div></div>`;
+        gate.style.display = ""; gate.innerHTML = `<div class="empty">${I.user}<div>${user ? `Signed in as <b>${esc(user.email)}</b> – this account is not an admin.<br><small style="color:var(--muted)">Ask the site owner to add this email in Admin → Admins, then sign in again.</small>` : "Admin area. Please sign in with an admin Google account."}<br><br>${user ? `<a href="#" id="gOut" style="color:var(--link)">Sign out</a>` : `<button class="btn" id="gIn">${I.user} Sign in</button>`}</div></div>`;
         $("#gIn")?.addEventListener("click", openLogin); $("#gOut")?.addEventListener("click", async e => { e.preventDefault(); await Auth.logout(); location.reload(); });
         return;
       }
@@ -167,6 +182,40 @@
         const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || r.statusText); return j;
       }
       fetch((NX_CONFIG.API_BASE || "") + "/api/health").then(r => r.json()).then(h => $("#health").textContent = `${h.novels} novels · RAM ${(h.mem / 1048576).toFixed(0)} MB · up ${(h.uptime / 3600).toFixed(1)} h`).catch(() => $("#health").textContent = "unreachable");
+
+      // ---- admin management (owner only) ----
+      (async () => {
+        let me = { owner: !!devToken || Auth.isOwner() };
+        try { me = await call("GET", "/api/me"); } catch { }
+        if (!me.owner) return;
+        const panel = $("#adminsPanel"); panel.style.display = "";
+        $("#aTitle").innerHTML = `${I.user} Admins`;
+        const myEmail = (user && user.email || "").toLowerCase();
+        // best-effort mirror into Firestore admins/{email} so firestore.rules can grant comment moderation
+        const fsAdmins = window.firebase && Auth.enabled && !devToken ? firebase.firestore().collection("admins") : null;
+        const mirror = (em, on) => { if (!fsAdmins) return; (on ? fsAdmins.doc(em).set({ email: em, addedBy: myEmail, addedAt: Date.now() }) : fsAdmins.doc(em).delete()).catch(e => console.warn("admins mirror", e.message)); };
+        function renderAdmins(d) {
+          const rows = [
+            ...d.owners.map(e => `<div class="row"><div class="t"><b class="truncate">${esc(e)}</b><small>Owner · can manage admins</small></div><span class="pill owner">owner</span></div>`),
+            ...d.admins.map(a => `<div class="row"><div class="t"><b class="truncate">${esc(a.email)}</b><small>Added ${esc((a.addedAt || "").slice(0, 10))}${a.addedBy ? " by " + esc(a.addedBy) : ""}</small></div><a href="#" class="pill danger" data-rm="${esc(a.email)}" title="Remove admin">✕</a></div>`)
+          ];
+          $("#aCount").textContent = `${d.owners.length + d.admins.length} total`;
+          $("#adminList").innerHTML = rows.join("") || `<div class="hint">No extra admins yet.</div>`;
+          $$("[data-rm]").forEach(a => a.addEventListener("click", async e => {
+            e.preventDefault(); const em = a.dataset.rm;
+            if (!confirm(`Remove admin access from\n\n${em}\n\nThey will no longer be able to upload or edit novels.`)) return;
+            try { renderAdmins(await call("DELETE", `/api/admins/${encodeURIComponent(em)}`)); mirror(em, false); toast("Admin removed"); } catch (err) { toast(err.message); }
+          }));
+        }
+        try { renderAdmins(await call("GET", "/api/admins")); } catch (err) { $("#adminList").innerHTML = `<div class="hint">${esc(err.message)}</div>`; }
+        $("#addAdminForm").addEventListener("submit", async e => {
+          e.preventDefault(); const f = e.target; const em = f.email.value.trim().toLowerCase();
+          if (!em) return;
+          if (em === myEmail) return toast("You are already the owner");
+          if (!confirm(`Make this email an admin?\n\n${em}\n\nWhen this Google account signs in it will automatically get the Admin panel and can upload / edit / delete novels.`)) return;
+          try { renderAdmins(await call("POST", "/api/admins", { email: em })); mirror(em, true); f.reset(); toast(`${em} is now an admin`); } catch (err) { toast(err.message); }
+        });
+      })();
 
       let novels = DB.novels.slice(); let cur = null;
       const nf = $("#novelForm");
