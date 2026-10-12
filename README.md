@@ -100,7 +100,7 @@ the novel is published on the site. **Author is always `Nitesh`**; nothing else 
 | Step | Send | Notes |
 |---|---|---|
 | 1 | Cover **photo** | caption may already contain the details |
-| 2 | Details text | `Title: …` / `Genres: Fantasy, Action` / `Status: Ongoing\|Completed` / `Summary: …` (multi-line ok). Plain text works too: first line = title, rest = summary |
+| 2 | Details text | Any "share card" format works – emojis, bullets and markdown are stripped, keys are matched loosely (`Title/Name`, `Genre/Genres/Tags`, `Status`, `Summary/Synopsis/Description`, `Rating`, `Language`). Lines like `Author:`, `Source:`, `Chapters:`, `Uploaded by:` are **ignored** (author is always Nitesh). Genres are mapped to the site's genre list (`Fan-Fiction` → Fan-fic, `systemflow` → System, `Cultivation` → Xianxia, …) and inferred from the synopsis when none match. Language is guessed from the source/author (FanMTL / Chinese author → Chinese Novel). Plain text works too: first line = title, rest = summary |
 | 3 | `.epub` or `.txt` **file** | chapters are extracted exactly like the web admin (cover/TOC pages skipped, `Chapter 12` numbering detected). Max 20 MB (Telegram limit) |
 
 Commands: `/status` draft preview · `/new` start another novel · `/cancel` · `/list` · `/id`.
