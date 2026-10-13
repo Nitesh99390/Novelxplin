@@ -385,6 +385,10 @@ body.reader-page.theme-light { background: #f3f4f8; }
 .chapter-content .sub { color: var(--muted); font-size: 12.5px; margin-bottom: 26px; padding-bottom: 16px; border-bottom: 1px solid rgba(15, 23, 42, .08); }
 .theme-dark .chapter-content .sub { border-color: #333; }
 .chapter-content p { font-size: var(--read-size, 18px); line-height: var(--read-lh, 1.8); margin-bottom: 1.1em; font-family: var(--read-font, Georgia, "Times New Roman", serif); }
+.chapter-content .reader-watermark { width: fit-content; max-width: 100%; margin: 10px 0 22px; padding: 4px 8px; border-left: 2px solid var(--accent); color: var(--muted); font: 11px/1.4 var(--font-ui, sans-serif); letter-spacing: .025em; user-select: all; }
+.reader-login-required { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 48px 20px; text-align: center; }
+.reader-login-required h2 { margin: 0; color: var(--text); font-size: 22px; }
+.reader-login-required p { max-width: 440px; margin: 0 0 8px; color: var(--muted); }
 /* Reader settings: hidden by default, opens as a popover from the gear icon in the top bar */
 .reader-top .icon-btn { width: 38px; min-width: 38px; height: 36px; padding: 0; justify-content: center; flex-shrink: 0; cursor: pointer; color: var(--text-2); }
 .reader-top .icon-btn .icon { width: 18px; height: 18px; }

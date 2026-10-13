@@ -31,6 +31,9 @@ const CATALOG = path.join(DATA, "catalog.json");
 const ADMINS_FILE = path.join(DATA, "admins.json");
 const RATINGS_FILE = path.join(DATA, "ratings.json");
 const PORT = +process.env.PORT || 3000;
+// The dev bypass must never be usable by the production service, even if its
+// systemd environment accidentally contains ADMIN_DEV_TOKEN.
+const DEV_TOKEN_ENABLED = process.env.NODE_ENV === "development" && !!process.env.ADMIN_DEV_TOKEN;
 
 // Owner emails (super-admins): env override or js/config.js. Owners can add/remove
 // extra admins from the admin panel; those are persisted in data/admins.json.
@@ -162,9 +165,14 @@ async function verifyIdToken(token) {
   const ok = crypto.createVerify("RSA-SHA256").update(parts[0] + "." + parts[1]).verify(cert, b64url(parts[2]));
   if (!ok) throw new Error("bad signature");
   const now = Math.floor(Date.now() / 1000);
-  if (payload.exp < now) throw new Error("expired");
-  if (FIREBASE_PROJECT && payload.aud !== FIREBASE_PROJECT) throw new Error("bad audience");
-  if (!payload.email) throw new Error("no email");
+  if (!Number.isSafeInteger(payload.exp) || payload.exp <= now) throw new Error("expired");
+  if (!Number.isSafeInteger(payload.iat) || payload.iat > now + 60) throw new Error("bad issued-at time");
+  if (!Number.isSafeInteger(payload.auth_time) || payload.auth_time > now + 60) throw new Error("bad auth time");
+  if (!FIREBASE_PROJECT) throw new Error("Firebase project not configured");
+  if (payload.aud !== FIREBASE_PROJECT) throw new Error("bad audience");
+  if (payload.iss !== `https://securetoken.google.com/${FIREBASE_PROJECT}`) throw new Error("bad issuer");
+  if (typeof payload.sub !== "string" || !payload.sub || payload.sub.length > 128) throw new Error("bad subject");
+  if (typeof payload.email !== "string" || !payload.email) throw new Error("no email");
   return payload;
 }
 async function requireAdmin(req) {
@@ -172,7 +180,7 @@ async function requireAdmin(req) {
   const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
   if (!token) throw Object.assign(new Error("Login required"), { status: 401 });
   // Dev bypass: ADMIN_DEV_TOKEN env lets you test without Firebase
-  if (process.env.ADMIN_DEV_TOKEN && token === process.env.ADMIN_DEV_TOKEN) return { email: OWNERS[0], dev: true, owner: true };
+  if (DEV_TOKEN_ENABLED && token === process.env.ADMIN_DEV_TOKEN) return { email: OWNERS[0], dev: true, owner: true };
   let p; try { p = await verifyIdToken(token); } catch (e) { throw Object.assign(new Error("Invalid token: " + e.message), { status: 401 }); }
   if (!isAdmin(p.email)) throw Object.assign(new Error("Not an admin"), { status: 403 });
   p.owner = isOwner(p.email);
@@ -183,7 +191,7 @@ async function requireUser(req) {
   const auth = req.headers.authorization || "";
   const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
   if (!token) throw Object.assign(new Error("Login required"), { status: 401 });
-  if (process.env.ADMIN_DEV_TOKEN && token === process.env.ADMIN_DEV_TOKEN) return { uid: "dev-user", email: OWNERS[0], name: "Dev", dev: true };
+  if (DEV_TOKEN_ENABLED && token === process.env.ADMIN_DEV_TOKEN) return { uid: "dev-user", email: OWNERS[0], name: "Dev", dev: true };
   let p; try { p = await verifyIdToken(token); } catch (e) { throw Object.assign(new Error("Invalid token: " + e.message), { status: 401 }); }
   const uid = String(p.sub || p.user_id || "").replace(/[^A-Za-z0-9_-]/g, "").slice(0, 128);
   if (!uid) throw Object.assign(new Error("Invalid token: no uid"), { status: 401 });
@@ -210,6 +218,8 @@ async function requireOwner(req) {
 const NX_SECRET = process.env.NX_SECRET || crypto.randomBytes(32).toString("hex");
 const TRUST_PROXY = /^(1|true|yes)$/i.test(process.env.TRUST_PROXY || "");
 const CH_MIN = +process.env.CHAPTER_LIMIT_MIN || 40, CH_HOUR = +process.env.CHAPTER_LIMIT_HOUR || 500;
+const CH_ACCOUNT_MIN = +process.env.CHAPTER_ACCOUNT_LIMIT_MIN || 20;
+const CH_ACCOUNT_HOUR = +process.env.CHAPTER_ACCOUNT_LIMIT_HOUR || 60;
 const TOKEN_WINDOW = 2 * 60 * 60 * 1000; // token lifetime
 const BAD_UA = /python|curl|wget|axios|node-fetch|undici|go-http-client|okhttp|java\/|libwww|httpx|aiohttp|scrapy|requests|postman|insomnia|headless|phantom|puppeteer|playwright|selenium|http\.rb|guzzle|restsharp|powershell|dart:io|cfnetwork(?!.*safari)/i;
 function clientIp(req) {
@@ -237,6 +247,7 @@ function checkToken(req) {
   return sig.length === exp.length && crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(exp));
 }
 const rl = new Map(); // ip -> { m, mt, h, ht, strikes, st, block, seen }
+const accountRl = new Map(); // Firebase uid -> { m, mt, h, ht, seen }
 function rateLimit(req, perMin, perHour) {
   const ip = clientIp(req), now = Date.now();
   let e = rl.get(ip); if (!e) rl.set(ip, e = { m: 0, mt: now, h: 0, ht: now, strikes: 0, st: now, block: 0, seen: now });
@@ -253,6 +264,24 @@ function rateLimit(req, perMin, perHour) {
   return { ok: true };
 }
 setInterval(() => { const cut = Date.now() - 2 * 3600000; for (const [k, v] of rl) if (v.seen < cut && v.block < Date.now()) rl.delete(k); }, 10 * 60 * 1000).unref();
+function accountRateLimit(uid) {
+  const now = Date.now();
+  let e = accountRl.get(uid);
+  if (!e) accountRl.set(uid, e = { m: 0, mt: now, h: 0, ht: now, seen: now });
+  e.seen = now;
+  if (now - e.mt > 60000) { e.m = 0; e.mt = now; }
+  if (now - e.ht > 3600000) { e.h = 0; e.ht = now; }
+  e.m++; e.h++;
+  if (e.m > CH_ACCOUNT_MIN || e.h > CH_ACCOUNT_HOUR) {
+    const retry = e.m > CH_ACCOUNT_MIN ? Math.max(1, Math.ceil((e.mt + 60000 - now) / 1000)) : Math.max(1, Math.ceil((e.ht + 3600000 - now) / 1000));
+    return { ok: false, code: 429, retry, msg: "Account chapter limit reached - try again later" };
+  }
+  return { ok: true };
+}
+setInterval(() => { const cut = Date.now() - 2 * 3600000; for (const [k, v] of accountRl) if (v.seen < cut) accountRl.delete(k); }, 10 * 60 * 1000).unref();
+function chapterWatermark(uid) {
+  return "NX-" + crypto.createHmac("sha256", NX_SECRET).update("reader-watermark|" + String(uid)).digest("hex").slice(0, 12).toUpperCase();
+}
 function guardChapter(req) {
   const ua = String(req.headers["user-agent"] || "");
   if (!ua || ua.length < 12 || BAD_UA.test(ua)) return { code: 403, body: { error: "Forbidden" } };
@@ -729,8 +758,20 @@ async function handle(req, res) {
         const cn = safeNum(num); if (!cn) return send(res, 400, { error: "Bad chapter number" });
         if (req.method === "GET") {
           const g = guardChapter(req); if (g) return send(res, g.code, g.body, g.headers);
-          try { const raw = await fsp.readFile(chapFile(slug, cn)); n.views = (n.views || 0) + 1; saveCatalog(); return send(res, 200, raw, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "private, max-age=300", "Vary": "X-NX-Token" }); }
-          catch { return send(res, 404, { error: "Chapter not found" }); }
+          let user;
+          try { user = await requireUser(req); }
+          catch (e) { return send(res, e.status || 401, { error: e.message || "Login required" }, { "Cache-Control": "no-store" }); }
+          const accountLimit = accountRateLimit(user.uid);
+          if (!accountLimit.ok) return send(res, accountLimit.code, { error: accountLimit.msg }, { "Retry-After": String(accountLimit.retry), "Cache-Control": "no-store" });
+          try {
+            const chapter = JSON.parse(await fsp.readFile(chapFile(slug, cn), "utf8"));
+            chapter.watermarkId = chapterWatermark(user.uid);
+            n.views = (n.views || 0) + 1; saveCatalog();
+            return send(res, 200, chapter, { "Cache-Control": "private, no-store", "Vary": "Origin, Authorization, X-NX-Token" });
+          } catch (e) {
+            if (e.code === "ENOENT") return send(res, 404, { error: "Chapter not found" });
+            throw e;
+          }
         }
         if (req.method === "PUT") {
           await requireAdmin(req); const ch = await readJSON(req, 10 * 1024 * 1024);

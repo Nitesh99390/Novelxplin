@@ -37,22 +37,26 @@ Old `*.html?x=` links are **301-redirected** to the clean form, so bookmarks and
 | *(anything else)* | `404.html` | Branded 404 page (HTTP 404, `noindex`) with popular novels + genres |
 | Telegram bot | – | **Admin only** – upload novels from your phone: photo → details → `.epub` (see §4) |
 
-## Anti-scraping (chapter text protection)
+## Chapter access controls and anti-scraping
 
-Chapter text is the whole product, so `GET /api/novels/:slug/chapters/:num` is guarded in `server.js` (zero deps, ~2 KB RAM per IP):
+`GET /api/novels/:slug/chapters/:num` is protected in `server.js`; novel listings and chapter indexes remain public, while full chapter text requires a valid Firebase sign-in:
 
 | Layer | What it stops |
 |-------|---------------|
+| **Firebase account gate** – the chapter endpoint requires a signed-in account. The server verifies the Firebase signature, project audience, issuer, subject, and token times. | Anonymous chapter reads and tokens from a different Firebase project |
+| **Per-account quota** – `CHAPTER_ACCOUNT_LIMIT_MIN` (20/min) and `CHAPTER_ACCOUNT_LIMIT_HOUR` (60/h), keyed by Firebase UID. | Fast chapter harvesting through one account |
+| **Personalized watermark** – each response includes a stable pseudonymous reader ID, shown in the reader after every 8 paragraphs and at the end of shorter sections. It does not expose the user's email. | Discourages reposting and helps associate a screenshot/text copy with an account |
 | **Page token** – every rendered page carries `<meta name="nx-t">`, an HMAC bound to the visitor's network (/24) and valid 2 h. `js/data.js` sends it as `X-NX-Token`; chapter requests without a valid one get **403**. | Scripts that just loop `chapters/1..N`; copy-pasted tokens from another machine |
 | **User-agent filter** – empty / short UAs and HTTP libraries & headless browsers (`python-requests`, `curl`, `wget`, `axios`, `node-fetch`, `okhttp`, `Go-http-client`, `Headless`, `Puppeteer`, `Playwright`, `Selenium`, …) get **403** | 95 % of AI-generated dump scripts |
 | **Per-IP rate limit** – `CHAPTER_LIMIT_MIN` (40/min) and `CHAPTER_LIMIT_HOUR` (500/h) → **429**; 8 violations in an hour → **1 h block** (403, logged as `[guard] blocked <ip>`) | Fast bulk download even with a real browser / valid token |
 | **Same-origin CORS** – `Access-Control-Allow-Origin` is only echoed for the site's own host (was `*`). The custom header also forces a preflight. | Other websites embedding/proxying our API from the browser |
-| Chapter index (`/chapters`) light limit 60/min, `Cache-Control: private` on chapter JSON | Shared caches re-serving chapter text |
+| **No shared chapter cache** – personalized chapter responses use `Cache-Control: private, no-store` and vary by authorization. | A shared cache returning one reader's response to another |
 
 Env knobs: `NX_SECRET` (HMAC key; random per boot if unset – set it so tokens survive restarts, e.g. `openssl rand -hex 32`),
 `TRUST_PROXY=1` (**only** when behind Cloudflare/nginx – takes the client IP from `CF-Connecting-IP` / `X-Forwarded-For`; without it all users would share the proxy IP and hit the limit together),
-`CHAPTER_LIMIT_MIN`, `CHAPTER_LIMIT_HOUR`.
+`CHAPTER_LIMIT_MIN`, `CHAPTER_LIMIT_HOUR`, `CHAPTER_ACCOUNT_LIMIT_MIN`, `CHAPTER_ACCOUNT_LIMIT_HOUR`.
 If a token expires on a long-open tab, `js/data.js` silently re-reads the page to fetch a fresh one – readers never see it.
+Per-IP and per-account counters are in memory and reset when the server restarts; use a shared persistent limiter before running multiple server instances. Because chapter text is delivered to a reader's browser, these controls deter bulk copying but cannot make screenshots or manual copying impossible.
 
 ## Listen (text-to-speech) – Hindi + Indian-language neural voices
 
@@ -86,7 +90,7 @@ Code: `js/tts.js` (engines) + the TTS section of `js/reader.js`.
 4. **Project settings → Your apps → Web (</>)** → register → copy the `firebaseConfig` object
    into `js/config.js` (`FIREBASE: {...}`).
 
-Without Firebase config the site still works (library/history stay in localStorage, no login).
+Without Firebase config the public catalog and chapter index still load, but reading chapter text requires Firebase Google sign-in.
 
 ## 2. Deploy on Oracle VM (Ubuntu, 1 GB RAM)
 
@@ -203,7 +207,7 @@ additionally require an admin email.
 Admin requests send `Authorization: Bearer <Firebase ID token>`; the server verifies the
 RS256 signature against Google's public certs and checks the email against `ADMIN_EMAILS`
 (owners) **or** `data/admins.json` (extra admins added from the panel).
-For local dev without Firebase: `ADMIN_DEV_TOKEN=dev node server.js` and open `/admin?dev=dev`.
+For local dev without Firebase: `NODE_ENV=development ADMIN_DEV_TOKEN=dev node server.js` and open `/admin?dev=dev`.
 
 ## SEO: robots.txt + sitemaps (Google Search Console)
 

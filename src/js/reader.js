@@ -42,12 +42,15 @@ document.addEventListener("app:ready", async () => {
   const content = $("#content");
   function renderChapter(ch) {
     const body = Array.isArray(ch.body) ? ch.body : String(ch.body || "").split(/\n{2,}|\n/).filter(Boolean);
+    const watermarkId = String(ch.watermarkId || "");
+    const watermark = watermarkId ? `<div class="reader-watermark" aria-label="Personalized reader watermark">Personal reader copy &middot; ${esc(watermarkId)}</div>` : "";
     paras = body;
     const words = body.join(" ").split(/\s+/).filter(Boolean).length;
     const mins = Math.max(1, Math.round(words / 230));
     content.innerHTML = `<h1>${esc(ch.title || title)}</h1>
       <div class="sub">${esc(n.title)} &middot; ${esc((ch.date || "").slice(0, 10))} &middot; ${words.toLocaleString()} words &middot; ${I.clock} ${mins} min read</div>`
-      + body.map((p, i) => `<p data-i="${i}">${esc(p)}</p>`).join("")
+      + body.map((p, i) => `<p data-i="${i}">${esc(p)}</p>${watermark && (i + 1) % 8 === 0 ? watermark : ""}`).join("")
+      + (watermark && body.length % 8 ? watermark : "")
       + `<div class="chapter-end">
           <div class="ce-title">End of ${esc(ch.title || title)}</div>
           <div class="ce-actions">
@@ -59,7 +62,12 @@ document.addEventListener("app:ready", async () => {
     $("#shareBtn")?.addEventListener("click", share);
   }
   try { renderChapter(await DB.chapter(n.slug, c)); }
-  catch (e) { content.innerHTML = `<div class="empty">${I.search}<div>Failed to load chapter: ${esc(e.message)}</div></div>`; }
+  catch (e) {
+    if (e.status === 401) {
+      content.innerHTML = `<div class="empty reader-login-required">${I.user}<h2>Sign in to read this chapter</h2><p>Chapter text is available to signed-in readers. Your account also gets a private reader watermark.</p><button class="btn" id="readerLogin">Log in with Google</button></div>`;
+      $("#readerLogin")?.addEventListener("click", () => window.openLogin ? window.openLogin() : toast("Login is not available right now"));
+    } else content.innerHTML = `<div class="empty">${I.search}<div>Failed to load chapter: ${esc(e.message)}</div></div>`;
+  }
   // in-place chapter switch (used by TTS auto-continue so audio keeps playing in background)
   async function loadChapter(cc) {
     const ch = await DB.chapter(n.slug, cc);
