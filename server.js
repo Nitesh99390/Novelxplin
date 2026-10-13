@@ -18,7 +18,6 @@ const path = require("path");
 const crypto = require("crypto");
 const https = require("https");
 const zlib = require("zlib");
-const edgeTTS = require("./lib/edgetts");
 
 const ROOT = __dirname;
 // Frontend is built by Vite (src/ → dist/). Static HTML/JS/CSS is served from
@@ -301,14 +300,14 @@ function guardChapter(req) {
    Catalog / search / novel pages stay public (SEO) but the chapter TEXT itself requires a
    verified Google sign-in (Firebase ID token). On top of the IP/UA guards above:
      * CHAPTER_QUOTA_DAY distinct chapters per rolling CHAPTER_QUOTA_WINDOW_H hours per uid
-       (default 50 / 24 h). Counted per DISTINCT (slug, num) so re-opening / refreshing / TTS
+       (default 1000 / 24 h, same for every account). Counted per DISTINCT (slug, num) so re-opening / refreshing / TTS
        warm-up / retries of the same chapter never burn quota twice.
      * Prefetches (X-NX-Prefetch: 1) are only served when the chapter is already in the user's
        window or the quota has head-room, and they do NOT count: the chapter is only charged when
        the reader actually opens it (the real request without the prefetch header).
      * Every served chapter is watermarked with a pseudonymous id = HMAC(uid, secret) – stable per
        account, not reversible, but matchable against our own records if a dump leaks. */
-const QUOTA_DAY = Math.max(1, +process.env.CHAPTER_QUOTA_DAY || 50);
+const QUOTA_DAY = Math.max(1, +process.env.CHAPTER_QUOTA_DAY || 1000);
 const QUOTA_WINDOW = Math.max(1, +process.env.CHAPTER_QUOTA_WINDOW_H || 24) * 3600000;
 const QUOTA_FILE = path.join(DATA, "quota.json");
 let quota = {}; // uid -> { [slug/num]: ms }
@@ -382,10 +381,19 @@ function corsHeaders(req) {
 }
 
 /* ---------- helpers ---------- */
+// gzip every compressible JSON/text response ≥ 1 KB when the client accepts it (chapter JSON
+// shrinks ~4×, catalog ~6×). Binary / pre-compressed bodies are passed through untouched.
+const GZ_MIN = 1024;
 function send(res, code, body, headers) {
   const isObj = typeof body !== "string" && !Buffer.isBuffer(body);
-  const data = isObj ? JSON.stringify(body) : body;
-  res.writeHead(code, Object.assign({ "Content-Type": isObj ? "application/json; charset=utf-8" : "text/plain; charset=utf-8", "X-Content-Type-Options": "nosniff", "Referrer-Policy": "strict-origin-when-cross-origin" }, res.req ? corsHeaders(res.req) : {}, headers || {}));
+  let data = isObj ? JSON.stringify(body) : body;
+  const h = Object.assign({ "Content-Type": isObj ? "application/json; charset=utf-8" : "text/plain; charset=utf-8", "X-Content-Type-Options": "nosniff", "Referrer-Policy": "strict-origin-when-cross-origin" }, res.req ? corsHeaders(res.req) : {}, headers || {});
+  const req = res.req;
+  if (req && code === 200 && !h["Content-Encoding"] && !Buffer.isBuffer(body) && /\bgzip\b/.test(req.headers["accept-encoding"] || "") && /^(application\/json|text\/|application\/javascript|application\/xml|image\/svg)/.test(String(h["Content-Type"])) && Buffer.byteLength(data) >= GZ_MIN) {
+    data = zlib.gzipSync(Buffer.from(data), { level: 6 }); h["Content-Encoding"] = "gzip";
+    h.Vary = h.Vary ? h.Vary + ", Accept-Encoding" : "Accept-Encoding";
+  }
+  res.writeHead(code, h);
   res.end(data);
 }
 function readBody(req, limit) {
@@ -745,16 +753,6 @@ async function saveImage(buf, ct) {
   return "/uploads/" + name;
 }
 
-/* ---------- TTS relay cache (small, memory-bounded: ≤ 6 MB) ---------- */
-const ttsCache = new Map(); const TTS_TTL = 10 * 60 * 1000, TTS_MAX = +process.env.TTS_MAX_PARALLEL || 8;
-let ttsBusy = 0;
-function ttsEvict() {
-  let bytes = 0; const now = Date.now();
-  for (const [k, v] of ttsCache) { if (v.exp < now) ttsCache.delete(k); else bytes += v.buf.length; }
-  for (const k of ttsCache.keys()) { if (bytes <= 6 * 1024 * 1024) break; bytes -= ttsCache.get(k).buf.length; ttsCache.delete(k); }
-}
-setInterval(ttsEvict, 60 * 1000).unref();
-
 /* ---------- router ---------- */
 async function handle(req, res) {
   const url = new URL(req.url, "http://x");
@@ -890,36 +888,6 @@ async function handle(req, res) {
       return send(res, 405, { error: "Method not allowed" });
     }
 
-    // ---- Listen: Edge neural voice relay ----
-    // Microsoft now blocks browsers that are not Edge (403), so the phone can no longer talk to the
-    // voice service directly. The server speaks the Edge protocol on its behalf and streams back MP3.
-    // Cheap: ~50 KB per paragraph, 1-second in-memory cache, max 8 parallel synths, 1500-char cap.
-    //   GET /api/tts?voice=hi-IN-SwaraNeural&rate=1.1&q=<text>   or   POST {voice, rate, text}
-    if (seg[1] === "tts") {
-      if (req.method !== "GET" && req.method !== "POST") return send(res, 405, { error: "Method not allowed" });
-      let voice, rate, text, pitch;
-      if (req.method === "POST") { const b = await readJSON(req, 64 * 1024); voice = b.voice; rate = b.rate; text = b.text; pitch = b.pitch; }
-      else { voice = url.searchParams.get("voice"); rate = url.searchParams.get("rate"); text = url.searchParams.get("q"); pitch = url.searchParams.get("pitch"); }
-      voice = String(voice || "en-US-AriaNeural").trim(); rate = Math.max(0.5, Math.min(2, +rate || 1));
-      pitch = Math.max(-50, Math.min(50, Math.round(+pitch || 0))); // percent, 0 = natural
-      text = String(text || "").replace(/\s+/g, " ").trim().slice(0, 1500);
-      if (!edgeTTS.VOICE_RE.test(voice)) return send(res, 400, { error: "Invalid voice" });
-      if (!text) return send(res, 400, { error: "Missing text" });
-      const key = crypto.createHash("sha1").update(`${voice}|${rate}|${pitch}|${text}`).digest("hex");
-      const hit = ttsCache.get(key);
-      if (hit && hit.exp > Date.now()) { hit.exp = Date.now() + TTS_TTL; return send(res, 200, hit.buf, { "Content-Type": "audio/mpeg", "Cache-Control": "public, max-age=86400", "X-TTS-Cache": "HIT" }); }
-      if (ttsBusy >= TTS_MAX) return send(res, 503, { error: "Voice server busy – try again" }, { "Retry-After": "2" });
-      ttsBusy++;
-      try {
-        const buf = await edgeTTS.synthesize(text, voice, { rate, pitch: (pitch >= 0 ? "+" : "") + pitch + "%", timeout: 25000 });
-        ttsCache.set(key, { buf, exp: Date.now() + TTS_TTL }); ttsEvict();
-        return send(res, 200, buf, { "Content-Type": "audio/mpeg", "Cache-Control": "public, max-age=86400", "X-TTS-Cache": "MISS" });
-      } catch (e) {
-        console.warn("[tts]", e.message);
-        return send(res, 502, { error: "Edge voice unavailable: " + e.message });
-      } finally { ttsBusy--; }
-    }
-
     // cover image upload (raw bytes, Content-Type image/*) -> /uploads/<id>.<ext>
     if (seg[1] === "upload" && req.method === "POST") {
       await requireAdmin(req);
@@ -957,9 +925,14 @@ async function handle(req, res) {
   let st; try { st = await fsp.stat(abs); } catch { return notFound(req, res); }
   if (st.isDirectory()) return notFound(req, res);
   const ext = path.extname(abs).toLowerCase();
-  const headers = { "Content-Type": MIME[ext] || "application/octet-stream", "Cache-Control": ext === ".html" ? "no-cache" : "public, max-age=86400" };
+  // Vite output under /_nx/static/ is content-hashed → cache forever (immutable). HTML is always
+  // revalidated (it carries the per-visitor nx-t token); everything else (uploads, favicon) 1 day.
+  const immutable = file.startsWith("/_nx/static/");
+  const headers = { "Content-Type": MIME[ext] || "application/octet-stream", "Cache-Control": ext === ".html" ? "no-cache" : immutable ? "public, max-age=31536000, immutable" : "public, max-age=86400", "Vary": "Accept-Encoding" };
+  const etag = `W/"${st.size.toString(16)}-${Math.floor(st.mtimeMs).toString(16)}"`; headers.ETag = etag; headers["Last-Modified"] = st.mtime.toUTCString();
+  if (req.headers["if-none-match"] === etag) { res.writeHead(304, headers); return res.end(); }
   const gzOk = /\bgzip\b/.test(req.headers["accept-encoding"] || "") && /^(\.html|\.js|\.css|\.svg|\.json|\.txt)$/.test(ext);
-  if (gzOk) { headers["Content-Encoding"] = "gzip"; res.writeHead(200, headers); fs.createReadStream(abs).pipe(zlib.createGzip()).pipe(res); }
+  if (gzOk) { headers["Content-Encoding"] = "gzip"; res.writeHead(200, headers); fs.createReadStream(abs).pipe(zlib.createGzip({ level: 6 })).pipe(res); }
   else { headers["Content-Length"] = st.size; res.writeHead(200, headers); fs.createReadStream(abs).pipe(res); }
 }
 

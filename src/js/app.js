@@ -138,23 +138,40 @@
       } catch (e) { console.warn("pull", e.message); }
     }
   };
+  const TOK_KEY = "nx_idtok", TOK_TTL = 50 * 60 * 1000;
+  const tokCache = {
+    get() { try { const j = JSON.parse(sessionStorage.getItem(TOK_KEY) || "null"); if (j && j.t && j.exp > Date.now()) return j.t; } catch { } return null; },
+    set(t, uid) { try { sessionStorage.setItem(TOK_KEY, JSON.stringify({ t, uid, exp: Date.now() + TOK_TTL })); } catch { } },
+    clear() { try { sessionStorage.removeItem(TOK_KEY); } catch { } }
+  };
   const Auth = {
     enabled: !!fbAuth,
     user() { return store.get("nx_user", null); },
     isAdmin() { const u = this.user(); return !!u && (u.admin === true || isOwnerEmail(u.email)); },
     isOwner() { const u = this.user(); return !!u && (u.owner === true || isOwnerEmail(u.email)); },
-    async token() { return fbAuth && fbAuth.currentUser ? fbAuth.currentUser.getIdToken() : null; },
+    // Firebase ID token, cached in sessionStorage for ~50 min (tokens are valid 60 min). On a cold
+    // page load Firebase needs 1–3 s to restore the session before getIdToken() resolves – with the
+    // cache the first chapter request fires instantly; the SDK refreshes the token in the background.
+    async token() {
+      const cached = tokCache.get(); if (cached) return cached;
+      if (!fbAuth) return null;
+      if (!fbAuth.currentUser) { try { await Promise.race([Auth.ready, new Promise(r => setTimeout(r, 4000))]); } catch { } }
+      if (!fbAuth.currentUser) return null;
+      const t = await fbAuth.currentUser.getIdToken(); tokCache.set(t, fbAuth.currentUser.uid); return t;
+    },
     async login() {
       if (!fbAuth) { toast("Firebase config missing – set js/config.js"); return null; }
       const prov = new firebase.auth.GoogleAuthProvider();
       try { await fbAuth.signInWithPopup(prov); } catch (e) { if (e.code === "auth/popup-blocked" || e.code === "auth/operation-not-supported-in-this-environment") await fbAuth.signInWithRedirect(prov); else { toast(e.message); throw e; } }
     },
-    async logout() { localStorage.removeItem("nx_user"); if (fbAuth) await fbAuth.signOut(); },
+    async refreshToken() { tokCache.clear(); if (!fbAuth || !fbAuth.currentUser) return null; try { const t = await fbAuth.currentUser.getIdToken(true); tokCache.set(t, fbAuth.currentUser.uid); return t; } catch { return null; } },
+    async logout() { localStorage.removeItem("nx_user"); tokCache.clear(); if (fbAuth) await fbAuth.signOut(); },
     // resolves once initial auth state is known
     ready: new Promise(res => {
       if (!fbAuth) return res(null);
       const off = fbAuth.onAuthStateChanged(async u => {
         curUser = u;
+        if (!u) tokCache.clear(); else u.getIdToken().then(t => tokCache.set(t, u.uid)).catch(() => { }); // warm / refresh the cache
         if (u) { const role = await resolveRole(u); store.set("nx_user", { uid: u.uid, name: u.displayName || u.email.split("@")[0], email: u.email, photo: u.photoURL || "", admin: role.admin, owner: role.owner }); await Lib.pull(); }
         else localStorage.removeItem("nx_user");
         res(u); off && typeof off === "function" && 0; // keep listening for later changes

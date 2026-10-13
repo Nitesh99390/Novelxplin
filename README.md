@@ -49,7 +49,7 @@ Chapter text is the whole product, so `GET /api/novels/:slug/chapters/:num` is g
 | **Same-origin CORS** – `Access-Control-Allow-Origin` is only echoed for the site's own host (was `*`). The custom header also forces a preflight. | Other websites embedding/proxying our API from the browser |
 | Chapter index (`/chapters`) light limit 60/min, `Cache-Control: private, no-store` on chapter JSON | Shared caches re-serving chapter text |
 | **Login gate** – `GET /api/novels/:slug/chapters/:num` requires a verified Firebase ID token (`Authorization: Bearer`) → **401** `{code:"login"}` otherwise; the reader shows a "Sign in with Google" prompt. Catalog, search, finder, novel pages and chapter index stay public for SEO. | Anonymous bulk download; forces every scraper to burn a real Google account |
-| **Per-account quota** – `CHAPTER_QUOTA_DAY` (50) distinct chapters per `CHAPTER_QUOTA_WINDOW_H` (24) hours per uid → **429** `{code:"quota"}` with a clear reader message. Re-opening the same chapter, refreshes, TTS warm-up and prefetches (`X-NX-Prefetch: 1`) do **not** charge – a chapter is charged once, when it is actually opened. Persisted in `data/quota.json`. | One account reading faster than any human could |
+| **Per-account quota** – `CHAPTER_QUOTA_DAY` (1000, same for every account) distinct chapters per `CHAPTER_QUOTA_WINDOW_H` (24) hours per uid → **429** `{code:"quota"}` with a clear reader message. Re-opening the same chapter, refreshes, TTS warm-up and prefetches (`X-NX-Prefetch: 1`) do **not** charge – a chapter is charged once, when it is actually opened. Persisted in `data/quota.json`. | One account reading faster than any human could |
 | **Pseudonymous watermark** – every served chapter carries `wm = HMAC(uid, WM_SECRET)` (16 chars) as invisible zero-width Unicode runs inside several paragraphs (positions derived from the id) and as DOM metadata (`<meta name="nx-wm">`, `#content[data-wm]`, hidden `.wm` span). Owner-only `POST /api/watermark {text}` decodes a leaked paragraph; `{uid}` gives an account's id. | Tracing a leaked dump back to the exact account |
 
 Env knobs: `WM_SECRET` (watermark key; falls back to `NX_SECRET` – set it so ids are stable across restarts), `CHAPTER_QUOTA_DAY`, `CHAPTER_QUOTA_WINDOW_H`, `NX_SECRET` (HMAC key; random per boot if unset – set it so tokens survive restarts, e.g. `openssl rand -hex 32`),
@@ -61,24 +61,22 @@ If a token expires on a long-open tab, `js/data.js` silently re-reads the page t
 
 The reader's **Listen** button (`L`) opens a bottom **player card** (play/pause, prev/next paragraph,
 progress track, speed chip, voice chip). Tapping the voice chip opens a **Voice & speed sheet** with
-three engines, grouped voice list, speed slider and a sleep timer (15/30/60 min or "chapter end").
-Default voice is **Swara (Hindi)**.
+language tabs (Auto / हिन्दी / English IN / US / UK), ♀ ♂ gender filter, grouped voice list with
+preview, speed + pitch sliders and a sleep timer (15/30/60 min or "chapter end").
 
-| Engine | How | Voices |
-|--------|-----|--------|
-| **Neural** (default) | Microsoft Edge "Read aloud" voices. Since Oct-2026 Microsoft only accepts the Edge browser itself (needs the new `Sec-MS-GEC` **v2** token + Edge User-Agent), so browsers get **403**. `lib/edgetts.js` (zero deps) speaks the protocol from the server and `GET /api/tts?voice=&rate=&q=` streams back MP3 (~50 KB / paragraph, ≈0.7 s). 10-min in-memory cache (≤6 MB), max `TTS_MAX_PARALLEL` (8) concurrent synths, 1500-char cap → safe on a 1 GB VM. | Hindi (Swara, Madhur), 4 multilingual, English India/US/UK/AU, Marathi, Bengali, Tamil, Telugu, Gujarati, Kannada, Malayalam, Urdu – 40 voices |
-| **Google** | `translate.google.com/translate_tts` (what `gTTS` uses) streamed straight into `<audio>` – zero server load. ≤190-char chunks; page switches to `no-referrer`. | Hindi, English ×4, Marathi, Bengali, Tamil, Telugu, Gujarati, Kannada, Malayalam, Punjabi, Urdu, Nepali |
-| **Device** | `speechSynthesis` built into the browser/OS | Whatever is installed (Hindi first). Offline, but may stop when the screen locks. |
+**Speech is 100 % client-side** – the browser's built-in Web Speech API (`window.speechSynthesis`).
+The server never proxies, caches or synthesises audio: **zero TTS bandwidth / CPU / RAM on the VM**.
 
-Fallback chain: Neural fails → 2 quick retries → Google (same language) → Device.
+| | |
+|---|---|
+| **Voice selection** | `js/tts.js` ranks every installed voice: Google voices (Android / Chrome – "Google हिन्दी", "Google US English" …), Chrome/Edge "Natural"/"Online" voices, Apple premium voices score highest; legacy eSpeak/Pico lowest; offline (`localService`) voices get a bonus. **Auto** mode picks per paragraph – Devanagari → best `hi-IN` voice, otherwise best `en-IN`/`en-US`. |
+| **Hindi / English male & female** | Gender is inferred from well-known voice names so the ♀/♂ filter works on Android (Google TTS ships male + female for hi-IN and en-US/en-IN) and on iOS/macOS/Windows. |
+| **Reliability** | Long paragraphs are split at sentence ends (Chrome's ~15 s utterance bug), desktop Chrome gets a pause/resume nudge every 10 s, voice list is polled on WebViews that never fire `voiceschanged`, failed voice → 2 retries → falls back to Auto. |
+| **Player** | Media Session lock-screen / headset controls with the cover as artwork, resume position per chapter, click/double-tap a paragraph to start there, at chapter end the **next chapter is loaded in-place** and playback continues. |
 
-Edge/Google audio plays through one shared `<audio>` element, which means:
-* keeps playing with the **screen off / app in background**,
-* **lock-screen & headset controls** (play/pause/next/prev paragraph) via the Media Session API, with the novel cover as artwork,
-* next 2 paragraphs are pre-synthesised so there are no gaps,
-* at chapter end the **next chapter is loaded in-place** (no page reload → audio session is kept) and playback continues automatically; the URL/history/reading-history are updated.
+Tip for best quality on Android: *Settings → Accessibility → Text-to-speech → Google Text-to-speech → Install voice data → Hindi / English (India)*.
 
-Code: `js/tts.js` (engines) + the TTS section of `js/reader.js`.
+Code: `js/tts.js` (engine + voice ranking) + the TTS section of `js/reader.js`.
 
 ## 1. Firebase setup (5 min)
 
@@ -107,7 +105,7 @@ Ingress rule for TCP 80 (and 3000) from `0.0.0.0/0`.
 |------|---------|
 | Logs | `sudo journalctl -u novelxplin -f` |
 | Restart | `sudo systemctl restart novelxplin` |
-| Update code | `bash deploy/update.sh` (= `git pull && npm run build && sudo systemctl restart novelxplin`) |
+| Update code | `bash deploy/update.sh` (= `git pull && npm run build && sudo pm2 restart novelxplin`) |
 | Backup data | `bash deploy/backup.sh` → `backups/novelxplin-data-YYYY-MM-DD.tar.gz` |
 
 Memory footprint ≈ 50 MB RSS; chapters are streamed from disk, so 47 GB storage ≈ tens of thousands of chapters.
@@ -276,7 +274,6 @@ npm run dev          # http://localhost:3000  (admin: /admin?dev=dev)
 server.js            Node backend + static file server (+ starts Telegram bot when TELEGRAM_BOT_TOKEN set)
 lib/bot.js           Telegram upload bot (long polling, photo → details → epub)
 lib/epub.js          Zero-dependency EPUB parser (ZIP + XHTML → chapters) used by the bot
-lib/edgetts.js       Zero-dependency Edge neural TTS client (Sec-MS-GEC v2 token + RFC-6455 WebSocket) behind /api/tts
 js/skeleton.js       Sync skeleton painter – fills #siteHeader + every [data-sk] before data arrives (window.SK)
 src/js/config.js     Firebase config, owner email(s), API base
 js/data.js           API client (window.DB)
@@ -292,9 +289,13 @@ data/                (created at runtime) catalog.json, admins.json, chapters/<s
 ## Build system (Vite + obfuscation)
 
 The frontend lives in `src/` and is compiled by Vite into `dist/`, which `server.js` serves.
-Output is minified, split into hashed chunks (`/_nx/static/chunks/[name]-[hash].js`) and passed
-through `javascript-obfuscator` (control-flow flattening, RC4/base64 string arrays, dead-code
-injection, self-defending). **Never deploy `src/` directly – always `npm run build` first.**
+Output is minified, split into hashed chunks (`/_nx/static/chunks/[name]-[hash].js`) and **only our
+own code (`src/js/**`)** is passed through `javascript-obfuscator` (identifier renaming + base64
+string array). Vendor code from `node_modules` is split into its own `vendor` chunk and left as-is –
+obfuscating it (plus control-flow flattening / dead-code injection) used to inflate the bundle to
+500+ kB chunks and freeze low-end phones; total JS is now ~200 kB (was ~2.3 MB).
+`server.js` serves `/_nx/static/*` with `Cache-Control: public, max-age=31536000, immutable` + ETag,
+and gzips every JS/CSS/HTML/JSON response. **Never deploy `src/` directly – always `npm run build` first.**
 
 ```
 src/

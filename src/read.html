@@ -72,11 +72,19 @@
       <div class="ts-grab"></div>
       <div class="ts-head"><strong>Voice &amp; speed</strong><button class="ts-close" id="tsClose" aria-label="Close">&times;</button></div>
       <div class="ts-tabs" id="tsTabs">
-        <button data-eng="edge">Neural <small>best</small></button>
-        <button data-eng="google">Google</button>
-        <button data-eng="device">Device</button>
+        <button data-lang="auto">Auto <small>best</small></button>
+        <button data-lang="hi-IN">हिन्दी</button>
+        <button data-lang="en-IN">English · IN</button>
+        <button data-lang="en-US">English · US</button>
+        <button data-lang="en-GB">UK</button>
       </div>
       <p class="ts-note" id="tsNote"></p>
+      <div class="ts-row">
+        <label>Voice</label>
+        <div class="ts-chips" id="tsGender">
+          <button data-g="">Any</button><button data-g="♀">♀ Female</button><button data-g="♂">♂ Male</button>
+        </div>
+      </div>
       <div class="ts-search"><input type="search" id="tsFind" placeholder="Search voice or language…" aria-label="Search voices" autocomplete="off"></div>
       <div class="ts-list" id="tsList"></div>
       <div class="ts-row">
