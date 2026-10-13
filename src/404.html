@@ -7,7 +7,7 @@
   <meta name="robots" content="noindex">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Sora:wght@600;700&display=swap" rel="stylesheet">
   <link rel="icon" type="image/svg+xml" href="/img/favicon.svg">
-  <link rel="stylesheet" href="/css/style.css?v=20261013f">
+  <link rel="stylesheet" href="/css/style.css">
 </head>
 <body>
   <div id="siteHeader"></div>
@@ -43,24 +43,9 @@
     </div>
   </main>
   <div id="siteFooter"></div>
-  <script src="/js/skeleton.js?v=20261013c"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
-  <script src="/js/config.js?v=20261013c"></script>
-  <script src="/js/data.js?v=20261013c"></script>
-  <script src="/js/app.js?v=20261013c"></script>
-  <script>
-    document.addEventListener("app:ready", () => {
-      const { $, U, nCard, genreGrid, breadcrumb, I } = UI;
-      $("#crumb").innerHTML = breadcrumb([{ label: "Home", href: U.home }, { label: "Page not found" }]);
-      $("#title").innerHTML = `${I.search} Page not found`;
-      $("#pTitle").innerHTML = `${I.rocket} Popular right now`;
-      $("#gTitle").innerHTML = `${I.tag} Genres`;
-      const pop = DB.mostPopular(6);
-      $("#popular").innerHTML = pop.length ? pop.map(n => nCard(n)).join("") : `<div class="empty" style="grid-column:1/-1">No novels yet.</div>`;
-      $("#genres").innerHTML = genreGrid();
-    });
-  </script>
+  <script type="module" src="/js/pages/404.js"></script>
 </body>
 </html>

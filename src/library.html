@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Your Library - Novelxplin</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Sora:wght@600;700&display=swap" rel="stylesheet">
+  <link rel="icon" type="image/svg+xml" href="/img/favicon.svg">
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <div id="siteHeader"></div>
+  <main class="page">
+    <div class="wrap">
+      <div id="crumb" data-sk="crumb"></div>
+      <div class="grid-2">
+        <div style="display:flex;flex-direction:column;gap:14px">
+          <section class="panel">
+            <div class="panel-head"><h2 id="lTitle" data-sk="title"></h2><span class="more" id="acct" style="color:var(--muted)"></span></div>
+            <div id="lib" data-sk="lib:4"></div>
+          </section>
+          <section class="panel">
+            <div class="panel-head"><h2 id="hTitle" data-sk="title"></h2><a class="more" href="#" id="clearHist">Clear</a></div>
+            <div id="hist" data-sk="lib:3"></div>
+          </section>
+        </div>
+        <aside class="sidebar-stack">
+          <section class="panel">
+            <div class="panel-head"><h2 id="rTitle" data-sk="title"></h2></div>
+            <div id="ranking" data-sk="rank:10"></div>
+          </section>
+        </aside>
+      </div>
+    </div>
+  </main>
+  <div id="siteFooter"></div>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+  <script type="module" src="/js/pages/library.js"></script>
+</body>
+</html>

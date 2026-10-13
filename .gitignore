@@ -3,3 +3,4 @@ data/
 backups/
 *.log
 .DS_Store
+dist/

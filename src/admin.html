@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Admin - Novelxplin</title>
+  <meta name="robots" content="noindex">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Sora:wght@600;700&display=swap" rel="stylesheet">
+  <link rel="icon" type="image/svg+xml" href="/img/favicon.svg">
+  <link rel="stylesheet" href="/css/style.css">
+  <style>
+    #panelWrap > div, #panelWrap > aside, .panel { min-width: 0; }
+    .panel > .adm-form, .panel > .btn-row, .panel > .hint, .panel > #filter, .panel > .adm-list { margin-left: 12px; margin-right: 12px; }
+    .panel > .adm-form { padding: 12px 0; }
+    .panel > .btn-row { margin-top: 12px; }
+    .panel > .hint { padding-bottom: 12px; }
+    .panel > #filter { width: calc(100% - 24px) !important; margin-top: 12px; }
+    .panel > .adm-list { padding-bottom: 12px; }
+    .adm-form { display: grid; gap: 12px; min-width: 0; }
+    .adm-form label { display: grid; gap: 4px; font-size: 12px; color: var(--muted); font-weight: 500; min-width: 0; }
+    .adm-form input, .adm-form textarea, .adm-form select { font: inherit; padding: 8px 10px; border: 1px solid var(--line); border-radius: 4px; background: #fff; color: var(--text); width: 100%; max-width: 100%; min-width: 0; font-size: 14px; }
+    .adm-form input:focus, .adm-form textarea:focus, .adm-form select:focus { outline: 0; border-color: var(--accent); box-shadow: 0 0 0 2px rgba(240,118,26,.15); }
+    .adm-form input[type=file] { padding: 6px; font-size: 12px; }
+    .adm-form input[type=checkbox] { width: 16px; height: 16px; accent-color: var(--accent); }
+    .adm-form textarea { min-height: 90px; resize: vertical; }
+    .adm-form .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; }
+    .adm-genres { display: flex; flex-wrap: wrap; gap: 6px; }
+    .adm-genres label { display: inline-flex; flex-direction: row; align-items: center; gap: 5px; font-size: 12px; border: 1px solid var(--line); border-radius: 20px; padding: 4px 10px; cursor: pointer; background: #fff; color: var(--text); user-select: none; }
+    .adm-genres label:has(input:checked) { background: var(--accent); color: #fff; border-color: var(--accent); }
+    .adm-genres input { position: absolute; opacity: 0; width: 0 !important; height: 0; pointer-events: none; }
+    .adm-genres label { position: relative; }
+    .adm-genres label::before { content: "+"; font-weight: 700; font-size: 13px; line-height: 1; opacity: .6; }
+    .adm-genres label:has(input:checked)::before { content: "✓"; opacity: 1; }
+    .adm-genres label:has(input:focus-visible) { box-shadow: 0 0 0 2px rgba(240,118,26,.35); }
+    .cover-row { display: flex; gap: 10px; align-items: flex-start; min-width: 0; }
+    .cover-row > div { flex: 1; min-width: 0; }
+    .flag-row { display: flex; flex-wrap: wrap; gap: 14px; padding-top: 8px; }
+    .flag-row span { display: inline-flex; align-items: center; gap: 6px; color: var(--text); }
+    .adm-list { display: grid; gap: 6px; }
+    .adm-list .row { display: flex; align-items: center; gap: 10px; padding: 8px; border: 1px solid var(--line); border-radius: 4px; background: #fff; font-size: 13px; }
+    .adm-list .row .t { flex: 1; min-width: 0; }
+    .adm-list .row .t b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .adm-list .row .pill { flex-shrink: 0; max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .adm-list .row .t small { color: var(--muted); }
+    .adm-list .row.active { border-color: var(--accent); box-shadow: inset 3px 0 0 var(--accent); }
+    .pill { font-size: 11px; padding: 2px 7px; border-radius: 10px; background: #eef2f7; color: var(--muted); }
+    .pill.ok { background: #e6f6ea; color: var(--green); }
+    .drop { border: 2px dashed var(--line); border-radius: 6px; padding: 18px; text-align: center; color: var(--muted); font-size: 13px; background: #fafbfc; cursor: pointer; overflow-wrap: anywhere; }
+    .drop.over { border-color: var(--accent); background: #fff7f0; }
+    .prog { height: 6px; background: #eee; border-radius: 3px; overflow: hidden; margin-top: 8px; display: none; }
+    .prog i { display: block; height: 100%; background: var(--accent); width: 0; transition: width .2s; }
+    .chap-rows { max-height: 360px; overflow: auto; }
+    .hint { font-size: 12px; color: var(--muted); }
+    .danger { color: #c0392b !important; }
+    .cover-prev { width: 70px; height: 95px; object-fit: cover; border-radius: 3px; border: 1px solid var(--line); background: #eee; flex-shrink: 0; }
+    .btn-row .btn { flex: 1 1 auto; justify-content: center; }
+    .adm-admins .row .t b { font-weight: 500; }
+    .adm-admins .row .pill.owner { background: #fff1e6; color: var(--accent); }
+    .add-admin { display: flex; gap: 8px; margin-top: 10px; }
+    .add-admin input { flex: 1; min-width: 0; font: inherit; padding: 8px 10px; border: 1px solid var(--line); border-radius: 4px; font-size: 14px; }
+    .add-admin input:focus { outline: 0; border-color: var(--accent); box-shadow: 0 0 0 2px rgba(240,118,26,.15); }
+    .add-admin .btn { flex: 0 0 auto; }
+    @media (max-width: 700px) {
+      .adm-form .two { grid-template-columns: 1fr; }
+      .adm-form input, .adm-form textarea, .adm-form select { font-size: 16px; } /* prevent iOS zoom */
+      .adm-genres label { padding: 6px 11px; font-size: 13px; }
+      .chap-rows { max-height: 420px; }
+    }
+  </style>
+</head>
+<body>
+  <div id="siteHeader"></div>
+  <main class="page">
+    <div class="wrap">
+      <div id="crumb" data-sk="crumb"></div>
+      <div id="gate" class="panel" style="display:none"></div>
+      <div id="panelWrap" class="grid-2" style="display:none">
+        <div style="display:flex;flex-direction:column;gap:14px">
+          <section class="panel">
+            <div class="panel-head"><h2 id="nTitle"></h2><a class="more" href="/admin" id="newBtn">+ New novel</a></div>
+            <form class="adm-form" id="novelForm">
+              <input type="hidden" name="slug">
+              <label>Title *<input name="title" required placeholder="Novel title"></label>
+              <div class="two">
+                <label>Author<input name="author" placeholder="Author name"></label>
+                <label>Type<select name="lang"></select></label>
+              </div>
+              <div class="two">
+                <label>Status<select name="status"><option>Ongoing</option><option>Completed</option></select></label>
+                <label title="Shown until real readers vote; after that the average of user votes is displayed">Base rating (0–5)<input name="rating" type="number" step="0.1" min="0" max="5" value="0"></label>
+              </div>
+              <label>Genres<div class="adm-genres" id="genreBoxes"></div></label>
+              <label>Summary<textarea name="summary" placeholder="One paragraph per line"></textarea></label>
+              <div class="two">
+                <label>Cover image<div class="cover-row"><img class="cover-prev" id="coverPrev" alt=""><div><input type="file" id="coverFile" accept="image/png,image/jpeg,image/webp,image/gif"><input name="cover" placeholder="or paste image URL" style="margin-top:6px"></div></div></label>
+                <label>Flags<div class="flag-row"><span><input type="checkbox" name="hot"> Mark HOT</span></div></label>
+              </div>
+              <div class="btn-row"><button class="btn" type="submit" id="saveNovel">Save novel</button><button class="btn ghost danger" type="button" id="delNovel" style="display:none">Delete novel</button></div>
+            </form>
+          </section>
+
+          <section class="panel" id="chapPanel" style="display:none">
+            <div class="panel-head"><h2 id="cTitle"></h2><span class="more" id="cCount" style="color:var(--muted)"></span></div>
+            <div class="adm-form">
+              <div class="drop" id="drop">
+                <b>Upload EPUB</b><br>Drop an <code>.epub</code> file here or click to pick. Every chapter inside the book is extracted automatically.<br>
+                <span class="hint">Chapter numbers are read from headings like “Chapter 12: Title” / “第12章”; otherwise they continue from the last chapter. Cover / TOC / copyright pages are skipped.</span>
+                <input type="file" id="chapFiles" multiple accept=".epub,application/epub+zip" style="display:none">
+                <div class="prog" id="prog"><i></i></div>
+              </div>
+              <details>
+                <summary style="cursor:pointer;font-size:13px;font-weight:500">Or add / edit one chapter manually</summary>
+                <form id="chapForm" class="adm-form" style="margin-top:10px">
+                  <div class="two">
+                    <label>Chapter number (blank = next)<input name="num" type="number" min="1"></label>
+                    <label>Title<input name="title" placeholder="Chapter 1: The Beginning"></label>
+                  </div>
+                  <label>Body<textarea name="body" style="min-height:220px" placeholder="Paste chapter text…"></textarea></label>
+                  <div class="btn-row"><button class="btn" type="submit">Save chapter</button></div>
+                </form>
+              </details>
+              <div class="chap-rows adm-list" id="chapList"></div>
+            </div>
+          </section>
+        </div>
+
+        <aside class="sidebar-stack">
+          <section class="panel">
+            <div class="panel-head"><h2 id="lTitle"></h2><span class="more" id="lCount" style="color:var(--muted)"></span></div>
+            <input type="text" id="filter" placeholder="Filter novels…" style="padding:7px 10px;border:1px solid var(--line);border-radius:4px;margin-bottom:8px;font:inherit">
+            <div class="adm-list" id="novelList"></div>
+          </section>
+          <section class="panel" id="adminsPanel" style="display:none">
+            <div class="panel-head"><h2 id="aTitle"></h2><span class="more" id="aCount" style="color:var(--muted)"></span></div>
+            <p class="hint" style="margin:10px 12px 0">Anyone who signs in with Google using one of these emails gets the Admin panel and can upload novels. Only you (the owner) can add or remove admins.</p>
+            <form class="add-admin" id="addAdminForm" style="margin-left:12px;margin-right:12px">
+              <input type="email" name="email" placeholder="new-admin@gmail.com" required autocomplete="off">
+              <button class="btn" type="submit">+ Add</button>
+            </form>
+            <div class="adm-list adm-admins" id="adminList" style="margin:10px 12px 12px"></div>
+          </section>
+          <section class="panel">
+            <div class="panel-head"><h2 id="tTitle"></h2></div>
+            <div class="btn-row"><a class="btn ghost" href="#" id="backupBtn">⬇ Download full backup</a></div>
+            <p class="hint" style="margin-top:8px">Server: <span id="health">…</span></p>
+          </section>
+        </aside>
+      </div>
+    </div>
+  </main>
+  <div id="siteFooter"></div>
+
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  <script type="module" src="/js/pages/admin.js"></script>
+</body>
+</html>
