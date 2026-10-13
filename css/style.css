@@ -813,3 +813,28 @@ body.ts-open { overflow: hidden; }
 .theme-dark .ts-chips button, .theme-night .ts-chips button, .theme-oled .ts-chips button { background: #1c2333; border-color: #2e3850; color: #e2e8f0; }
 .theme-dark .ts-chips button.active, .theme-night .ts-chips button.active, .theme-oled .ts-chips button.active { background: var(--accent); border-color: var(--accent); }
 .theme-dark .ts-av, .theme-night .ts-av, .theme-oled .ts-av { background: #1c2333; color: #cbd5e1; }
+
+/* ---- Listen player: polish (v g) ---- */
+.tp-chap { font-size: 11.5px; color: #94a3b8; min-width: 0; max-width: 42%; margin-left: 2px; }
+.tp-track { cursor: pointer; position: relative; height: 4px; }
+.tp-track::before { content: ""; position: absolute; inset: -10px 0; } /* bigger tap target */
+.tp-track:hover i { filter: brightness(1.15); }
+.tp-follow { display: inline-flex; align-items: center; gap: 6px; margin: -4px auto 8px; height: 26px; padding: 0 12px; border: 0; border-radius: 999px; background: rgba(251, 146, 60, .18); color: #fdba74; font: inherit; font-size: 11.5px; font-weight: 700; cursor: pointer; animation: rs-in .2s var(--ease); }
+.tp-follow[hidden] { display: none !important; }
+.tp-follow .icon { width: 14px; height: 14px; }
+.tts-player { display: flex; flex-direction: column; }
+.tts-player.loading .tp-pos::after { content: " · loading"; color: #fdba74; }
+.ts-search { margin: 2px 0 6px; }
+.ts-search input { width: 100%; height: 38px; padding: 0 14px; border: 1px solid #e2e8f0; border-radius: 12px; background: #f8fafc; font: inherit; font-size: 13px; color: inherit; outline: none; }
+.ts-search input:focus { border-color: var(--accent); background: #fff; box-shadow: 0 0 0 3px var(--accent-glow); }
+.ts-voice .ts-prev { margin-left: auto; width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; background: #f1f5f9; color: #475569; flex-shrink: 0; transition: all .15s; }
+.ts-voice .icon + .ts-prev, .ts-voice.active .ts-prev { margin-left: 6px; }
+.ts-voice .ts-prev .icon { width: 16px; height: 16px; margin: 0; color: inherit; }
+.ts-voice .ts-prev:hover { background: var(--accent); color: #fff; }
+.ts-voice .ts-prev.playing { background: var(--accent); color: #fff; animation: pulse 1.2s infinite; }
+.chapter-content p[data-i] { transition: background .25s, box-shadow .25s; border-radius: 6px; }
+.chapter-content p.speaking { border-radius: 6px; }
+body.tts-on .chapter-content p[data-i] { cursor: pointer; }
+body.tts-on .chapter-content p[data-i]:hover:not(.speaking) { background: rgba(249, 115, 22, .06); }
+body.tts-on .reader-wrap { padding-bottom: 160px; }
+@media (max-width: 480px) { .tp-chap { display: none; } }
