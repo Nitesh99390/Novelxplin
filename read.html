@@ -43,9 +43,12 @@
     <span>Auto-scroll</span><button data-as="-1">&minus;</button><b id="asVal">2</b><button data-as="1">+</button><button id="asStop" class="stop">Stop</button>
   </div>
   <div class="float-bar tts" id="ttsBar" hidden>
-    <span>Listening</span>
+    <span>Listening <em id="ttsStatus"></em></span>
     <button id="ttsPrev" title="Previous paragraph">&#9664;</button><button id="ttsPause">Pause</button><button id="ttsNext" title="Next paragraph">&#9654;</button>
     <button data-rate="-0.1">&minus;</button><b id="ttsRateVal">1x</b><button data-rate="0.1">+</button>
+    <select id="ttsEngine" aria-label="Voice engine" title="Voice engine – all run on your device, nothing goes through our server">
+      <option value="edge">Edge neural</option><option value="google">Google</option><option value="device">Device</option>
+    </select>
     <select id="ttsVoice" aria-label="Voice"></select>
     <button id="ttsStop" class="stop">Stop</button>
   </div>
@@ -73,6 +76,7 @@
   <script src="/js/config.js?v=20261013c"></script>
   <script src="/js/data.js?v=20261013c"></script>
   <script src="/js/app.js?v=20261013c"></script>
-  <script src="/js/reader.js?v=20261013d"></script>
+  <script src="/js/tts.js?v=20261013e"></script>
+  <script src="/js/reader.js?v=20261013e"></script>
 </body>
 </html>
