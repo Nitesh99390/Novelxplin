@@ -146,6 +146,26 @@ RS256 signature against Google's public certs and checks the email against `ADMI
 (owners) **or** `data/admins.json` (extra admins added from the panel).
 For local dev without Firebase: `ADMIN_DEV_TOKEN=dev node server.js` and open `admin.html?dev=dev`.
 
+## SEO: robots.txt + sitemaps (Google Search Console)
+
+`server.js` generates everything on the fly from the catalog – nothing to regenerate or upload.
+
+| URL | Contents |
+|-----|----------|
+| `/robots.txt` | Allows crawling, blocks `/admin.html`, `/api/`, `/library.html`, search result pages; points to `/sitemap.xml` |
+| `/sitemap.xml` | **Sitemap index** – submit only this one in Search Console |
+| `/sitemap-pages.xml` | Home, list/sort pages, finder, and one URL per genre (`genre.html?g=…`) |
+| `/sitemap-novels.xml` | One `<url>` per novel (`novel.html?n=<slug>`) with `lastmod`, `changefreq`, `priority` and the cover as an image-sitemap entry |
+| `/sitemap-chapters-<slug>.xml` | Every chapter of that novel (`read.html?n=<slug>&c=<n>`), newest 3 chapters flagged `weekly` |
+
+* `lastmod` comes from `updatedAt` (novels) / chapter date; completed novels are `monthly`, ongoing `daily`.
+* Output is cached 10 min in memory and invalidated whenever a novel/chapter is created, edited or deleted; gzip is used when the client accepts it.
+* Canonical host = `PUBLIC_URL` env (set to `https://novelxplin.in` by `deploy/setup-oracle.sh`). Falls back to `SITE_URL` if it is a real domain, else the request `Host` header.
+* On an existing server: `sudo systemctl edit novelxplin` → add `Environment=PUBLIC_URL=https://novelxplin.in` → `sudo systemctl daemon-reload && sudo systemctl restart novelxplin`.
+
+**Search Console**: *Sitemaps → Add a new sitemap →* `https://novelxplin.in/sitemap.xml` → Submit.
+Google reads the index and discovers all ~220 child sitemaps (and 180k+ chapter URLs) automatically.
+
 ## Loading skeletons
 
 Every page loads `js/skeleton.js` **first** (before Firebase). It synchronously paints grey

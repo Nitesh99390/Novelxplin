@@ -40,6 +40,8 @@ Environment=NODE_ENV=production
 Environment=TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
 Environment=TELEGRAM_ADMIN_IDS=${TELEGRAM_ADMIN_IDS:-}
 Environment=SITE_URL=${SITE_URL:-http://$(curl -s ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')}
+# Public domain used in robots.txt / sitemap.xml URLs (SEO). Set to your real domain.
+Environment=PUBLIC_URL=${PUBLIC_URL:-https://novelxplin.in}
 ExecStart=/usr/bin/node $APP_DIR/server.js
 Restart=always
 RestartSec=3
