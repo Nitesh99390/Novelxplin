@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Your Library - Novelxplin</title>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Sora:wght@600;700&display=swap" rel="stylesheet">
-  <link rel="icon" type="image/svg+xml" href="/img/favicon.svg">
-  <link rel="stylesheet" href="/css/style.css?v=20261013b">
+  <link rel="icon" type="image/svg+xml" href="img/favicon.svg">
+  <link rel="stylesheet" href="css/style.css?v=20261013b">
 </head>
 <body>
   <div id="siteHeader"></div>
@@ -34,17 +34,17 @@
     </div>
   </main>
   <div id="siteFooter"></div>
-  <script src="/js/skeleton.js?v=20261013b"></script>
+  <script src="js/skeleton.js?v=20261013b"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
-  <script src="/js/config.js?v=20261013b"></script>
-  <script src="/js/data.js?v=20261013b"></script>
-  <script src="/js/app.js?v=20261013b"></script>
+  <script src="js/config.js?v=20261013b"></script>
+  <script src="js/data.js?v=20261013b"></script>
+  <script src="js/app.js?v=20261013b"></script>
   <script>
     document.addEventListener("app:ready", () => {
-      const { $, esc, U, cover, rankList, breadcrumb, I } = UI;
-      $("#crumb").innerHTML = breadcrumb([{ label: "Home", href: U.home }, { label: "Your Library" }]);
+      const { $, esc, cover, rankList, breadcrumb, I } = UI;
+      $("#crumb").innerHTML = breadcrumb([{ label: "Home", href: "index.html" }, { label: "Your Library" }]);
       $("#lTitle").innerHTML = `${I.shelf} Your Library`;
       $("#hTitle").innerHTML = `${I.clock} Reading History`;
       $("#rTitle").innerHTML = `${I.star} Top Rated`;
@@ -59,17 +59,17 @@
         const ids = Lib.list();
         const hist = Lib.history();
         $("#lib").innerHTML = ids.length ? `<ul class="lib-list">${ids.map(id => { const n = DB.get(id); if (!n) return ""; const h = hist[id];
-          return `<li>${cover(n)}<div><div class="t truncate"><a href="${U.novel(n.slug)}">${esc(n.title)}</a></div>
-            <div class="s">${h ? `Read: <a href="${U.chapter(n.slug, h.chap)}">Chapter ${h.chap}</a> / ` : ""}Latest: <a href="${U.chapter(n.slug, n.chapters)}">Chapter ${n.chapters}</a> &middot; ${DB.timeAgo(n.updatedMinutesAgo)}</div></div>
+          return `<li>${cover(n)}<div><div class="t truncate"><a href="novel.html?n=${n.slug}">${esc(n.title)}</a></div>
+            <div class="s">${h ? `Read: <a href="read.html?n=${n.slug}&c=${h.chap}">Chapter ${h.chap}</a> / ` : ""}Latest: <a href="read.html?n=${n.slug}&c=${n.chapters}">Chapter ${n.chapters}</a> &middot; ${DB.timeAgo(n.updatedMinutesAgo)}</div></div>
             <button class="rm" data-rm="${id}">Remove</button></li>`; }).join("")}</ul>`
-          : `<div class="empty">${I.shelf}<div>Your library is empty.<br><a href="/most-popular" style="color:var(--link)">Browse popular novels</a> and add some.</div></div>`;
+          : `<div class="empty">${I.shelf}<div>Your library is empty.<br><a href="list.html?sort=most-popular" style="color:var(--link)">Browse popular novels</a> and add some.</div></div>`;
         $$("[data-rm]").forEach(b => b.addEventListener("click", () => { Lib.toggle(b.dataset.rm); renderLib(); toast("Removed from library"); }));
       }
       const $$ = UI.$$;
       function renderHist() {
         const h = Object.entries(Lib.history()).sort((a, b) => b[1].at - a[1].at);
         $("#hist").innerHTML = h.length ? `<ul class="lib-list">${h.map(([id, v]) => { const n = DB.get(id); if (!n) return "";
-          return `<li>${cover(n)}<div><div class="t truncate"><a href="${U.novel(n.slug)}">${esc(n.title)}</a></div><div class="s">Chapter ${v.chap} &middot; ${DB.timeAgo(Math.round((Date.now() - v.at) / 6e4))}</div></div><a class="rm" href="${U.chapter(n.slug, v.chap)}" style="color:var(--link)">Continue</a></li>`; }).join("")}</ul>`
+          return `<li>${cover(n)}<div><div class="t truncate"><a href="novel.html?n=${n.slug}">${esc(n.title)}</a></div><div class="s">Chapter ${v.chap} &middot; ${DB.timeAgo(Math.round((Date.now() - v.at) / 6e4))}</div></div><a class="rm" href="read.html?n=${n.slug}&c=${v.chap}" style="color:var(--link)">Continue</a></li>`; }).join("")}</ul>`
           : `<div class="empty">${I.clock}<div>No reading history yet.</div></div>`;
       }
       $("#clearHist").addEventListener("click", e => { e.preventDefault(); Lib.clearHistory(); renderHist(); toast("History cleared"); });
