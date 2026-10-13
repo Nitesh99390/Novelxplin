@@ -415,6 +415,26 @@ function resolveRoute(p, base) {
   return null;
 }
 
+// Automatic cache-busting for our own /js and /css files: the `?v=` in the HTML is
+// rewritten to a hash of the asset's size+mtime, so every deploy gets a fresh URL and
+// browsers / Cloudflare can never keep serving a stale app.js against new HTML
+// (that mismatch left the home page stuck on skeletons – "reading 'novel'" error).
+const assetVer = new Map(); // "/js/app.js" -> { exp, v }
+async function assetVersion(p) {
+  const hit = assetVer.get(p);
+  if (hit && hit.exp > Date.now()) return hit.v;
+  let v = null;
+  try { const st = await fsp.stat(path.join(ROOT, p)); v = crypto.createHash("md5").update(`${st.size}:${Math.round(st.mtimeMs)}`).digest("hex").slice(0, 10); } catch { }
+  assetVer.set(p, { exp: Date.now() + 10000, v });
+  return v;
+}
+const ASSET_RE = /((?:href|src)=")(\/(?:js|css)\/[\w.-]+\.(?:js|css))(?:\?v=[^"]*)?(")/g;
+async function versionAssets(html) {
+  const paths = [...new Set([...html.matchAll(ASSET_RE)].map(m => m[2]))];
+  const vers = Object.fromEntries(await Promise.all(paths.map(async p => [p, await assetVersion(p)])));
+  return html.replace(ASSET_RE, (m, a, p, z) => vers[p] ? `${a}${p}?v=${vers[p]}${z}` : m);
+}
+
 // Serve an HTML page with per-route <title>, description, canonical + og tags injected.
 const htmlCache = new Map(); // file -> { mtime, body }
 async function sendPage(req, res, r) {
@@ -438,6 +458,7 @@ async function sendPage(req, res, r) {
     .replace(/[ \t]*<meta\s+name="(description|robots)"[^>]*>\s*\n?/gi, "")
     .replace(/[ \t]*<link\s+rel="canonical"[^>]*>\s*\n?/gi, "");
   html = /<title>/i.test(html) ? html.replace(/<title>[\s\S]*?<\/title>/i, meta) : html.replace(/<head>/i, `<head>\n  ${meta}`);
+  html = await versionAssets(html);
   const buf = Buffer.from(html);
   const headers = { "Content-Type": MIME[".html"], "Cache-Control": "no-cache" };
   if (/\bgzip\b/.test(req.headers["accept-encoding"] || "")) { headers["Content-Encoding"] = "gzip"; return send(res, r.status || 200, zlib.gzipSync(buf), headers); }
