@@ -37,6 +37,23 @@ Old `*.html?x=` links are **301-redirected** to the clean form, so bookmarks and
 | *(anything else)* | `404.html` | Branded 404 page (HTTP 404, `noindex`) with popular novels + genres |
 | Telegram bot | – | **Admin only** – upload novels from your phone: photo → details → `.epub` (see §4) |
 
+## Anti-scraping (chapter text protection)
+
+Chapter text is the whole product, so `GET /api/novels/:slug/chapters/:num` is guarded in `server.js` (zero deps, ~2 KB RAM per IP):
+
+| Layer | What it stops |
+|-------|---------------|
+| **Page token** – every rendered page carries `<meta name="nx-t">`, an HMAC bound to the visitor's network (/24) and valid 2 h. `js/data.js` sends it as `X-NX-Token`; chapter requests without a valid one get **403**. | Scripts that just loop `chapters/1..N`; copy-pasted tokens from another machine |
+| **User-agent filter** – empty / short UAs and HTTP libraries & headless browsers (`python-requests`, `curl`, `wget`, `axios`, `node-fetch`, `okhttp`, `Go-http-client`, `Headless`, `Puppeteer`, `Playwright`, `Selenium`, …) get **403** | 95 % of AI-generated dump scripts |
+| **Per-IP rate limit** – `CHAPTER_LIMIT_MIN` (40/min) and `CHAPTER_LIMIT_HOUR` (500/h) → **429**; 8 violations in an hour → **1 h block** (403, logged as `[guard] blocked <ip>`) | Fast bulk download even with a real browser / valid token |
+| **Same-origin CORS** – `Access-Control-Allow-Origin` is only echoed for the site's own host (was `*`). The custom header also forces a preflight. | Other websites embedding/proxying our API from the browser |
+| Chapter index (`/chapters`) light limit 60/min, `Cache-Control: private` on chapter JSON | Shared caches re-serving chapter text |
+
+Env knobs: `NX_SECRET` (HMAC key; random per boot if unset – set it so tokens survive restarts, e.g. `openssl rand -hex 32`),
+`TRUST_PROXY=1` (**only** when behind Cloudflare/nginx – takes the client IP from `CF-Connecting-IP` / `X-Forwarded-For`; without it all users would share the proxy IP and hit the limit together),
+`CHAPTER_LIMIT_MIN`, `CHAPTER_LIMIT_HOUR`.
+If a token expires on a long-open tab, `js/data.js` silently re-reads the page to fetch a fresh one – readers never see it.
+
 ## Listen (text-to-speech) – Hindi + Indian-language neural voices
 
 The reader's **Listen** button (`L`) opens a bottom **player card** (play/pause, prev/next paragraph,

@@ -42,6 +42,8 @@ Environment=TELEGRAM_ADMIN_IDS=${TELEGRAM_ADMIN_IDS:-}
 Environment=SITE_URL=${SITE_URL:-http://$(curl -s ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')}
 # Public domain used in robots.txt / sitemap.xml URLs (SEO). Set to your real domain.
 Environment=PUBLIC_URL=${PUBLIC_URL:-https://novelxplin.in}
+Environment=NX_SECRET=${NX_SECRET:-$(openssl rand -hex 32 2>/dev/null || head -c 32 /dev/urandom | od -An -tx1 | tr -d " \n")}
+Environment=TRUST_PROXY=${TRUST_PROXY:-0}
 ExecStart=/usr/bin/node $APP_DIR/server.js
 Restart=always
 RestartSec=3

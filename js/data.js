@@ -25,9 +25,25 @@
   let bySlug = {};
   let loadError = null;
 
-  async function api(path, opts) {
+  // Anti-scraping token: server stamps <meta name="nx-t"> into every rendered page (bound to the
+  // reader's network + 2 h). Chapter requests must carry it as X-NX-Token. If it expires while a
+  // page is kept open, we re-read the current page (same origin, cached HTML) to get a fresh one.
+  let nxToken = (document.querySelector('meta[name="nx-t"]') || {}).content || "";
+  async function refreshToken() {
+    try { const h = await (await fetch(location.pathname, { cache: "no-store", credentials: "same-origin" })).text(); const m = /name="nx-t"\s+content="([^"]+)"/.exec(h); if (m) nxToken = m[1]; } catch { }
+    return nxToken;
+  }
+  async function api(path, opts, retry) {
+    opts = opts || {};
+    opts.headers = Object.assign({}, opts.headers || {}, nxToken ? { "X-NX-Token": nxToken } : {});
+    opts.credentials = opts.credentials || "same-origin";
     const r = await fetch(API + path, opts);
-    if (!r.ok) { let m = r.statusText; try { m = (await r.json()).error || m; } catch { } throw new Error(m); }
+    if (!r.ok) {
+      let m = r.statusText, code = ""; try { const j = await r.json(); m = j.error || m; code = j.code || ""; } catch { }
+      if (r.status === 403 && code === "token" && !retry && await refreshToken()) return api(path, opts, true);
+      if (r.status === 429) m = "Too many requests – please wait a moment";
+      throw new Error(m);
+    }
     return r.json();
   }
 

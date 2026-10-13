@@ -194,11 +194,83 @@ async function requireOwner(req) {
   return u;
 }
 
+/* ---------- anti-scraping / abuse protection (zero deps) ----------
+   Chapter text is the whole product, so GET /api/novels/:slug/chapters/:num is locked down:
+     * X-NX-Token header (HMAC, bound to client IP /24 + 2 h window) - issued only inside the
+       HTML pages we render (sendPage), so plain scripts / other sites can't just loop 1..N.
+       Custom header also forces a CORS preflight -> cross-origin scraping dies there.
+     * Known HTTP-library / headless user agents and empty UA are refused.
+     * Per-IP sliding limits: CH_MIN chapters/min, CH_HOUR chapters/hour. Exceeding = 429;
+       8 strikes in an hour = 1 h block (403). Humans never get near this, dump scripts do in seconds.
+     * CORS is same-origin only (was "*").
+   TRUST_PROXY=1 -> take client IP from CF-Connecting-IP / X-Forwarded-For (only when behind Cloudflare/nginx). */
+const NX_SECRET = process.env.NX_SECRET || crypto.randomBytes(32).toString("hex");
+const TRUST_PROXY = /^(1|true|yes)$/i.test(process.env.TRUST_PROXY || "");
+const CH_MIN = +process.env.CHAPTER_LIMIT_MIN || 40, CH_HOUR = +process.env.CHAPTER_LIMIT_HOUR || 500;
+const TOKEN_WINDOW = 2 * 60 * 60 * 1000; // token lifetime
+const BAD_UA = /python|curl|wget|axios|node-fetch|undici|go-http-client|okhttp|java\/|libwww|httpx|aiohttp|scrapy|requests|postman|insomnia|headless|phantom|puppeteer|playwright|selenium|http\.rb|guzzle|restsharp|powershell|dart:io|cfnetwork(?!.*safari)/i;
+function clientIp(req) {
+  if (TRUST_PROXY) {
+    const h = req.headers["cf-connecting-ip"] || req.headers["x-real-ip"] || (req.headers["x-forwarded-for"] || "").split(",")[0];
+    if (h && h.trim()) return h.trim();
+  }
+  return (req.socket && req.socket.remoteAddress) || "0.0.0.0";
+}
+// coarse network key so a phone whose IP hops inside the carrier /24 keeps its token
+function ipKey(ip) {
+  ip = String(ip).replace(/^::ffff:/, "");
+  if (ip.includes(":")) return ip.split(":").slice(0, 3).join(":");
+  return ip.split(".").slice(0, 3).join(".");
+}
+const b64u = b => Buffer.from(b).toString("base64").replace(/=+$/, "").replace(/\+/g, "-").replace(/\//g, "_");
+function tokenSig(ts, key) { return b64u(crypto.createHmac("sha256", NX_SECRET).update(ts + "|" + key).digest()).slice(0, 22); }
+function issueToken(req) { const ts = Date.now().toString(36); return ts + "." + tokenSig(ts, ipKey(clientIp(req))); }
+function checkToken(req) {
+  const t = String(req.headers["x-nx-token"] || ""); const i = t.indexOf(".");
+  if (i < 1 || t.length > 64) return false;
+  const ts = t.slice(0, i), sig = t.slice(i + 1); const age = Date.now() - parseInt(ts, 36);
+  if (!(age >= -60000 && age < TOKEN_WINDOW)) return false;
+  const exp = tokenSig(ts, ipKey(clientIp(req)));
+  return sig.length === exp.length && crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(exp));
+}
+const rl = new Map(); // ip -> { m, mt, h, ht, strikes, st, block, seen }
+function rateLimit(req, perMin, perHour) {
+  const ip = clientIp(req), now = Date.now();
+  let e = rl.get(ip); if (!e) rl.set(ip, e = { m: 0, mt: now, h: 0, ht: now, strikes: 0, st: now, block: 0, seen: now });
+  e.seen = now;
+  if (e.block > now) return { ok: false, code: 403, retry: Math.ceil((e.block - now) / 1000), msg: "Too many requests - temporarily blocked" };
+  if (now - e.mt > 60000) { e.m = 0; e.mt = now; }
+  if (now - e.ht > 3600000) { e.h = 0; e.ht = now; }
+  if (now - e.st > 3600000) { e.strikes = 0; e.st = now; }
+  e.m++; e.h++;
+  if (e.m > perMin || e.h > perHour) {
+    if (++e.strikes >= 8) { e.block = now + 3600000; console.warn(`[guard] blocked ${ip} for 1h (chapter dump)`); }
+    return { ok: false, code: 429, retry: e.m > perMin ? 60 : 900, msg: "Slow down - too many chapter requests" };
+  }
+  return { ok: true };
+}
+setInterval(() => { const cut = Date.now() - 2 * 3600000; for (const [k, v] of rl) if (v.seen < cut && v.block < Date.now()) rl.delete(k); }, 10 * 60 * 1000).unref();
+function guardChapter(req) {
+  const ua = String(req.headers["user-agent"] || "");
+  if (!ua || ua.length < 12 || BAD_UA.test(ua)) return { code: 403, body: { error: "Forbidden" } };
+  const r = rateLimit(req, CH_MIN, CH_HOUR);
+  if (!r.ok) return { code: r.code, body: { error: r.msg }, headers: { "Retry-After": String(r.retry) } };
+  if (!checkToken(req)) return { code: 403, body: { error: "Session expired - reload the page", code: "token" } };
+  return null;
+}
+function corsHeaders(req) {
+  const o = req.headers.origin; if (!o) return {};
+  const host = (req.headers["x-forwarded-host"] || req.headers.host || "").split(",")[0].trim();
+  let oh = ""; try { oh = new URL(o).host; } catch { }
+  if (!host || oh !== host) return {};
+  return { "Access-Control-Allow-Origin": o, "Access-Control-Allow-Headers": "Authorization, Content-Type, X-NX-Token", "Access-Control-Allow-Methods": "GET,POST,PUT,DELETE,OPTIONS", "Access-Control-Max-Age": "600", "Vary": "Origin" };
+}
+
 /* ---------- helpers ---------- */
 function send(res, code, body, headers) {
   const isObj = typeof body !== "string" && !Buffer.isBuffer(body);
   const data = isObj ? JSON.stringify(body) : body;
-  res.writeHead(code, Object.assign({ "Content-Type": isObj ? "application/json; charset=utf-8" : "text/plain; charset=utf-8", "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "Authorization, Content-Type", "Access-Control-Allow-Methods": "GET,POST,PUT,DELETE,OPTIONS" }, headers || {}));
+  res.writeHead(code, Object.assign({ "Content-Type": isObj ? "application/json; charset=utf-8" : "text/plain; charset=utf-8", "X-Content-Type-Options": "nosniff", "Referrer-Policy": "strict-origin-when-cross-origin" }, res.req ? corsHeaders(res.req) : {}, headers || {}));
   res.end(data);
 }
 function readBody(req, limit) {
@@ -453,6 +525,7 @@ async function sendPage(req, res, r) {
     `<meta property="og:title" content="${htmlEsc(r.title)}">`,
     `<meta property="og:description" content="${htmlEsc(r.desc)}">`,
     r.canonical ? `<meta property="og:url" content="${htmlEsc(r.canonical)}">` : "",
+    `<meta name="nx-t" content="${issueToken(req)}">`,
   ].filter(Boolean).join("\n  ");
   // drop any static description/robots/canonical tags so the per-route ones win (no duplicates)
   let html = hit.body
@@ -564,6 +637,7 @@ setInterval(ttsEvict, 60 * 1000).unref();
 async function handle(req, res) {
   const url = new URL(req.url, "http://x");
   const p = decodeURIComponent(url.pathname);
+  res.req = req;
   if (req.method === "OPTIONS") return send(res, 204, "");
 
   // ---- API ----
@@ -641,7 +715,7 @@ async function handle(req, res) {
       }
       if (sub === "view" && req.method === "POST") { n.views = (n.views || 0) + 1; saveCatalog(); return send(res, 200, { views: n.views }); }
       if (sub === "chapters") {
-        if (!num && req.method === "GET") return send(res, 200, await chapterIndex(slug), { "Cache-Control": "no-cache" });
+        if (!num && req.method === "GET") { const r = rateLimit(req, 60, 1200); if (!r.ok) return send(res, r.code, { error: r.msg }, { "Retry-After": String(r.retry) }); return send(res, 200, await chapterIndex(slug), { "Cache-Control": "no-cache" }); }
         // POST: add one chapter {num?, title, body}  OR bulk {chapters:[{num,title,body}]}
         if (!num && req.method === "POST") {
           await requireAdmin(req);
@@ -651,7 +725,8 @@ async function handle(req, res) {
         }
         const cn = safeNum(num); if (!cn) return send(res, 400, { error: "Bad chapter number" });
         if (req.method === "GET") {
-          try { const raw = await fsp.readFile(chapFile(slug, cn)); n.views = (n.views || 0) + 1; saveCatalog(); return send(res, 200, raw, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "public, max-age=300" }); }
+          const g = guardChapter(req); if (g) return send(res, g.code, g.body, g.headers);
+          try { const raw = await fsp.readFile(chapFile(slug, cn)); n.views = (n.views || 0) + 1; saveCatalog(); return send(res, 200, raw, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "private, max-age=300", "Vary": "X-NX-Token" }); }
           catch { return send(res, 404, { error: "Chapter not found" }); }
         }
         if (req.method === "PUT") {
