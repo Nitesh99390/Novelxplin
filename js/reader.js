@@ -8,7 +8,7 @@
 document.addEventListener("app:ready", async () => {
   const { $, $$, esc, q, U, I } = UI;
   const n = DB.get(q.get("n"));
-  const c = Math.max(1, parseInt(q.get("c") || "1", 10));
+  let c = Math.max(1, parseInt(q.get("c") || "1", 10));
   if (!n || c > n.chapters) { SK.clear(); $("#content").innerHTML = `<div class="empty">${I.search}<div>Chapter not found.</div></div>`; return; }
   Lib.mark(n.id, c);
 
@@ -23,7 +23,7 @@ document.addEventListener("app:ready", async () => {
   let index = [];
   try { index = await DB.chapters(n.slug); } catch { }
   const titleOf = cc => { const x = index.find(i => i.num === cc); return x && x.title ? x.title : `Chapter ${cc}`; };
-  const title = titleOf(c);
+  let title = titleOf(c);
   document.title = `${n.title} - ${title} | Novelxplin`;
   $("#rtTitle").innerHTML = `<a href="${U.novel(n.slug)}">${esc(n.title)}</a> <span style="color:var(--muted)">/ ${esc(title)}</span>`;
 
@@ -40,8 +40,7 @@ document.addEventListener("app:ready", async () => {
   $("#content").innerHTML = SK.html("reader", 4);
   let paras = [];
   const content = $("#content");
-  try {
-    const ch = await DB.chapter(n.slug, c);
+  function renderChapter(ch) {
     const body = Array.isArray(ch.body) ? ch.body : String(ch.body || "").split(/\n{2,}|\n/).filter(Boolean);
     paras = body;
     const words = body.join(" ").split(/\s+/).filter(Boolean).length;
@@ -57,13 +56,30 @@ document.addEventListener("app:ready", async () => {
           </div>
           <button class="btn ghost small" id="shareBtn">${I.horn} Share chapter</button>
         </div>`;
-  } catch (e) { content.innerHTML = `<div class="empty">${I.search}<div>Failed to load chapter: ${esc(e.message)}</div></div>`; }
+    $("#shareBtn")?.addEventListener("click", share);
+  }
+  try { renderChapter(await DB.chapter(n.slug, c)); }
+  catch (e) { content.innerHTML = `<div class="empty">${I.search}<div>Failed to load chapter: ${esc(e.message)}</div></div>`; }
+  // in-place chapter switch (used by TTS auto-continue so audio keeps playing in background)
+  async function loadChapter(cc) {
+    const ch = await DB.chapter(n.slug, cc);
+    c = cc; title = titleOf(c); Lib.mark(n.id, c);
+    document.title = `${n.title} - ${title} | Novelxplin`;
+    $("#rtTitle").innerHTML = `<a href="${U.novel(n.slug)}">${esc(n.title)}</a> <span style="color:var(--muted)">/ ${esc(title)}</span>`;
+    $("#navTop").innerHTML = nav(); $("#navBottom").innerHTML = nav();
+    renderChapter(ch);
+    try { history.pushState({ c }, "", link(c)); } catch { }
+    scrollTo(0, 0);
+    if (c < n.chapters) DB.chapter(n.slug, c + 1).catch(() => { });
+  }
+  addEventListener("popstate", () => location.reload());
 
   // share
-  $("#shareBtn")?.addEventListener("click", async () => {
+  async function share() {
     const data = { title: document.title, text: `${n.title} – ${title}`, url: location.href };
     try { if (navigator.share) await navigator.share(data); else { await navigator.clipboard.writeText(location.href); toast("Link copied"); } } catch { }
-  });
+  }
+  $("#shareBtn")?.addEventListener("click", share);
 
   // prefetch next chapter (API + HTML) so "Next" feels instant
   if (c < n.chapters) {
@@ -73,7 +89,7 @@ document.addEventListener("app:ready", async () => {
   }
 
   /* ---------- settings ---------- */
-  const DEF = { theme: "paper", size: 18, font: "serif", lh: 1.8, width: 860, align: "left", pspace: 1.1, autoSpeed: 2, ttsRate: 1, ttsVoice: "" };
+  const DEF = { theme: "paper", size: 18, font: "serif", lh: 1.8, width: 860, align: "left", pspace: 1.1, autoSpeed: 2, ttsRate: 1, ttsVoice: "", ttsEngine: "edge", edgeVoice: "en-US-AriaNeural", gLang: "en" };
   const prefs = Object.assign({}, DEF, JSON.parse(localStorage.getItem("nx_reader") || "{}"));
   const FONTS = { serif: 'Georgia, "Times New Roman", serif', sans: '"Inter", "Roboto", "Segoe UI", Arial, sans-serif', merri: '"Merriweather", Georgia, serif', lora: '"Lora", Georgia, serif', dys: '"OpenDyslexic", "Comic Sans MS", sans-serif' };
   function apply() {
@@ -169,37 +185,138 @@ document.addEventListener("app:ready", async () => {
   });
   ["wheel", "touchstart"].forEach(ev => addEventListener(ev, () => { if (autoOn) { acc = 0; } }, { passive: true }));
 
-  // text-to-speech
+  // text-to-speech – 3 engines, all run on the user's device (zero server load)
+  //   edge   : Microsoft neural voices via WebSocket (edge-tts protocol)
+  //   google : Google Translate voice (gTTS)             device : browser speechSynthesis
+  // Edge/Google audio is played through a single <audio> element → keeps playing with the
+  // screen off / app in background, lock-screen controls via Media Session, auto next chapter.
   const ttsBtn = $("#tTts"), ttsBar = $("#ttsBar");
   const synth = window.speechSynthesis;
-  let ttsOn = false, ttsIdx = 0, utter = null;
+  const TT = window.NXTTS;
+  let ttsOn = false, ttsIdx = 0, utter = null, ttsSeq = 0, paused = false;
   const pEls = () => $$("#content p[data-i]");
+  const savePrefs = () => localStorage.setItem("nx_reader", JSON.stringify(prefs));
+  if (!["edge", "google", "device"].includes(prefs.ttsEngine)) prefs.ttsEngine = "edge";
+  if (!TT) prefs.ttsEngine = "device";
+
+  // single shared audio element (created on user gesture so mobile allows autoplay chain)
+  const audio = document.createElement("audio"); audio.preload = "auto"; audio.setAttribute("playsinline", ""); audio.setAttribute("referrerpolicy", "no-referrer"); try { audio.referrerPolicy = "no-referrer"; } catch { } document.body.appendChild(audio);
+  const cache = new Map(); // paragraph index → audio URL list (prefetched)
+  let queue = [], qi = 0, blobUrls = [];
+  const relBlobs = () => { blobUrls.forEach(u => { try { URL.revokeObjectURL(u); } catch { } }); blobUrls = []; };
+  // 0.1s of silence – played synchronously inside the user's tap so later play() calls (after async synthesis,
+  // on "ended", and after in-place chapter change) are allowed by mobile autoplay policies.
+  const SILENCE = (() => { const n = 800, b = new Uint8Array(44 + n), v = new DataView(b.buffer), w = (o, s) => [...s].forEach((ch, i) => b[o + i] = ch.charCodeAt(0)); w(0, "RIFF"); v.setUint32(4, 36 + n, true); w(8, "WAVEfmt "); v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true); v.setUint32(24, 8000, true); v.setUint32(28, 8000, true); v.setUint16(32, 1, true); v.setUint16(34, 8, true); w(36, "data"); v.setUint32(40, n, true); b.fill(128, 44); return URL.createObjectURL(new Blob([b], { type: "audio/wav" })); })();
+  let unlocked = false;
+  const unlock = () => { if (unlocked) return; audio.src = SILENCE; audio.play().then(() => { unlocked = true; }).catch(() => { }); };
+
   function pickVoice() {
     const vs = synth ? synth.getVoices() : [];
     return vs.find(v => v.name === prefs.ttsVoice) || vs.find(v => /^en/i.test(v.lang) && /Google|Natural|Premium/i.test(v.name)) || vs.find(v => /^en/i.test(v.lang)) || vs[0];
   }
   function fillVoices() {
-    const s = $("#ttsVoice"); if (!s || !synth) return;
-    const vs = synth.getVoices().filter(v => /^(en|hi)/i.test(v.lang));
-    s.innerHTML = vs.map(v => `<option value="${esc(v.name)}" ${v.name === prefs.ttsVoice ? "selected" : ""}>${esc(v.name.replace(/^Microsoft |^Google /, ""))} (${esc(v.lang)})</option>`).join("") || "<option>Default</option>";
+    const s = $("#ttsVoice"); if (!s) return;
+    let opts = "";
+    if (prefs.ttsEngine === "edge") { if (!TT.EDGE_VOICES.some(v => v[0] === prefs.edgeVoice)) prefs.edgeVoice = "en-US-AriaNeural"; opts = TT.EDGE_VOICES.map(v => `<option value="${v[0]}" ${v[0] === prefs.edgeVoice ? "selected" : ""}>${v[1]}</option>`).join(""); }
+    else if (prefs.ttsEngine === "google") { if (!TT.GOOGLE_LANGS.some(v => v[0] === prefs.gLang)) prefs.gLang = "en"; opts = TT.GOOGLE_LANGS.map(v => `<option value="${v[0]}" ${v[0] === prefs.gLang ? "selected" : ""}>${v[1]}</option>`).join(""); }
+    else { const vs = synth ? synth.getVoices().filter(v => /^(en|hi)/i.test(v.lang)) : []; opts = vs.map(v => `<option value="${esc(v.name)}" ${v.name === prefs.ttsVoice ? "selected" : ""}>${esc(v.name.replace(/^Microsoft |^Google /, ""))} (${esc(v.lang)})</option>`).join("") || "<option>Default</option>"; }
+    s.innerHTML = opts;
+    const eng = $("#ttsEngine"); if (eng) { eng.value = prefs.ttsEngine; if (!TT) eng.disabled = true; }
   }
-  if (synth) { fillVoices(); synth.onvoiceschanged = fillVoices; }
-  function speak(i) {
-    const els = pEls(); if (!synth || i >= els.length) { setTts(false); return; }
-    ttsIdx = i; els.forEach(p => p.classList.remove("speaking")); els[i].classList.add("speaking");
-    els[i].scrollIntoView({ block: "center", behavior: "smooth" });
-    utter = new SpeechSynthesisUtterance(els[i].textContent);
-    utter.rate = prefs.ttsRate; const v = pickVoice(); if (v) utter.voice = v;
-    utter.onend = () => { if (ttsOn) speak(i + 1); };
-    utter.onerror = () => setTts(false);
-    synth.speak(utter);
+  if (synth) synth.onvoiceschanged = () => { if (prefs.ttsEngine === "device") fillVoices(); };
+  fillVoices();
+
+  const voiceArg = () => prefs.ttsEngine === "edge" ? prefs.edgeVoice : prefs.gLang;
+  const cacheKey = i => `${prefs.ttsEngine}|${voiceArg()}|${prefs.ttsEngine === "edge" ? prefs.ttsRate : 1}|${i}`;
+  async function getAudio(i) {
+    const k = cacheKey(i); if (cache.has(k)) return cache.get(k);
+    const p = TT.synthesize(prefs.ttsEngine, pEls()[i].textContent, voiceArg(), prefs.ttsRate).then(urls => { if (prefs.ttsEngine === "edge") blobUrls.push(...urls); return urls; });
+    cache.set(k, p); p.catch(() => cache.delete(k));
+    if (cache.size > 12) cache.delete(cache.keys().next().value);
+    return p;
+  }
+  function highlight(i) {
+    const els = pEls(); els.forEach(p => p.classList.remove("speaking"));
+    if (els[i]) { els[i].classList.add("speaking"); if (document.visibilityState === "visible") els[i].scrollIntoView({ block: "center", behavior: "smooth" }); }
+    const s = $("#ttsStatus"); if (s) s.textContent = `${i + 1}/${els.length}`;
+  }
+  function setMedia(state) {
+    if (!("mediaSession" in navigator)) return;
+    try {
+      navigator.mediaSession.metadata = new MediaMetadata({ title, artist: n.title, album: "Novelxplin", artwork: n.cover ? [{ src: n.cover, sizes: "512x512", type: "image/jpeg" }] : [] });
+      navigator.mediaSession.playbackState = state;
+      navigator.mediaSession.setActionHandler("play", () => togglePause(false));
+      navigator.mediaSession.setActionHandler("pause", () => togglePause(true));
+      navigator.mediaSession.setActionHandler("stop", () => setTts(false));
+      navigator.mediaSession.setActionHandler("previoustrack", () => setTts(true, Math.max(0, ttsIdx - 1)));
+      navigator.mediaSession.setActionHandler("nexttrack", () => setTts(true, ttsIdx + 1));
+      navigator.mediaSession.setActionHandler("seekbackward", () => setTts(true, Math.max(0, ttsIdx - 1)));
+      navigator.mediaSession.setActionHandler("seekforward", () => setTts(true, ttsIdx + 1));
+    } catch { }
+  }
+  function playQueue(seq) {
+    if (seq !== ttsSeq || qi >= queue.length) return;
+    audio.src = queue[qi]; audio.playbackRate = prefs.ttsEngine === "google" ? prefs.ttsRate : 1;
+    const st = $("#ttsStatus"); if (st) st.textContent = `${ttsIdx + 1}/${pEls().length}`;
+    audio.play().catch(() => { if (seq === ttsSeq) { toast("Tap Resume to start listening"); togglePause(true); } });
+  }
+  audio.addEventListener("ended", () => { if (audio.src === SILENCE) return; qi++; if (qi < queue.length) playQueue(ttsSeq); else if (ttsOn) speak(ttsIdx + 1); });
+  audio.addEventListener("error", () => { if (!ttsOn || !audio.src || audio.src === SILENCE) return; toast("Audio failed – trying next paragraph"); qi++; if (qi < queue.length) playQueue(ttsSeq); else speak(ttsIdx + 1); });
+
+  async function nextChapter() {
+    if (c >= n.chapters) { setTts(false); toast("You're all caught up"); return; }
+    const st = $("#ttsStatus"); if (st) st.textContent = "next…";
+    const seq = ttsSeq;
+    try {
+      cache.clear(); relBlobs();
+      await loadChapter(c + 1);
+      if (!ttsOn || seq !== ttsSeq) return;
+      toast(`Now playing: ${title}`);
+      speak(0);
+    } catch (e) { toast("Could not load next chapter"); setTts(false); }
+  }
+  async function speak(i) {
+    const els = pEls(); if (i >= els.length) { nextChapter(); return; }
+    ttsIdx = i; highlight(i); paused = false; $("#ttsPause").textContent = "Pause";
+    const seq = ++ttsSeq;
+    if (prefs.ttsEngine === "device") {
+      if (!synth) { toast("Device voice not supported here – switch to Edge/Google"); return; }
+      synth.cancel();
+      utter = new SpeechSynthesisUtterance(els[i].textContent);
+      utter.rate = prefs.ttsRate; const v = pickVoice(); if (v) utter.voice = v;
+      utter.onend = () => { if (ttsOn && seq === ttsSeq) speak(i + 1); };
+      utter.onerror = e => { if (e.error !== "interrupted" && e.error !== "canceled") setTts(false); };
+      synth.speak(utter); return;
+    }
+    const st = $("#ttsStatus"); if (st) st.textContent = "…";
+    try {
+      queue = await getAudio(i); qi = 0;
+      if (seq !== ttsSeq || !ttsOn) return;
+      playQueue(seq); setMedia("playing");
+      // prefetch next 2 paragraphs so playback never stalls
+      for (let k = 1; k <= 2; k++) if (i + k < els.length) getAudio(i + k).catch(() => { });
+    } catch (e) {
+      if (seq !== ttsSeq) return;
+      console.warn("TTS", e);
+      if (prefs.ttsEngine === "edge") { toast("Edge voice unavailable – switched to Google voice"); prefs.ttsEngine = "google"; savePrefs(); fillVoices(); speak(i); }
+      else if (synth) { toast("Online voice failed – using device voice"); prefs.ttsEngine = "device"; savePrefs(); fillVoices(); speak(i); }
+      else { toast("Text-to-speech failed: " + e.message); setTts(false); }
+    }
+  }
+  function togglePause(p) {
+    if (!ttsOn) return;
+    paused = p; $("#ttsPause").textContent = p ? "Resume" : "Pause";
+    if (prefs.ttsEngine === "device") { p ? synth.pause() : synth.resume(); }
+    else { p ? audio.pause() : audio.play().catch(() => { }); }
+    if ("mediaSession" in navigator) navigator.mediaSession.playbackState = p ? "paused" : "playing";
   }
   function setTts(on, from) {
-    if (!synth) { toast("Text-to-speech not supported in this browser"); return; }
     ttsOn = on; ttsBtn.classList.toggle("active", on); ttsBar.hidden = !on;
-    synth.cancel();
+    ttsSeq++; if (synth) synth.cancel();
+    audio.pause();
+    if (on && prefs.ttsEngine !== "device") unlock(); else { audio.removeAttribute("src"); audio.load(); }
     if (on) { $("#ttsRateVal").textContent = prefs.ttsRate + "x"; speak(from ?? ttsIdx); }
-    else pEls().forEach(p => p.classList.remove("speaking"));
+    else { pEls().forEach(p => p.classList.remove("speaking")); relBlobs(); cache.clear(); if ("mediaSession" in navigator) navigator.mediaSession.playbackState = "none"; }
   }
   ttsBtn.addEventListener("click", () => setTts(!ttsOn));
   ttsBar.addEventListener("click", e => {
@@ -207,17 +324,21 @@ document.addEventListener("app:ready", async () => {
     if (b.id === "ttsPrev") setTts(true, Math.max(0, ttsIdx - 1));
     if (b.id === "ttsNext") setTts(true, ttsIdx + 1);
     if (b.id === "ttsStop") setTts(false);
-    if (b.id === "ttsPause") { if (synth.paused) { synth.resume(); b.textContent = "Pause"; } else { synth.pause(); b.textContent = "Resume"; } }
-    if (b.dataset.rate) { prefs.ttsRate = Math.max(.5, Math.min(2, +(prefs.ttsRate + +b.dataset.rate).toFixed(1))); localStorage.setItem("nx_reader", JSON.stringify(prefs)); setTts(true, ttsIdx); }
+    if (b.id === "ttsPause") togglePause(!paused);
+    if (b.dataset.rate) { prefs.ttsRate = Math.max(.5, Math.min(2, +(prefs.ttsRate + +b.dataset.rate).toFixed(1))); savePrefs(); $("#ttsRateVal").textContent = prefs.ttsRate + "x"; if (prefs.ttsEngine === "google") audio.playbackRate = prefs.ttsRate; else setTts(true, ttsIdx); }
   });
-  $("#ttsVoice")?.addEventListener("change", e => { prefs.ttsVoice = e.target.value; localStorage.setItem("nx_reader", JSON.stringify(prefs)); if (ttsOn) setTts(true, ttsIdx); });
+  $("#ttsEngine")?.addEventListener("change", e => { prefs.ttsEngine = e.target.value; savePrefs(); cache.clear(); fillVoices(); if (ttsOn) setTts(true, ttsIdx); });
+  $("#ttsVoice")?.addEventListener("change", e => {
+    if (prefs.ttsEngine === "edge") prefs.edgeVoice = e.target.value; else if (prefs.ttsEngine === "google") prefs.gLang = e.target.value; else prefs.ttsVoice = e.target.value;
+    savePrefs(); cache.clear(); if (ttsOn) setTts(true, ttsIdx);
+  });
   // click a paragraph while TTS is on → start reading from there
   content.addEventListener("click", e => {
     const p = e.target.closest("p[data-i]");
     if (ttsOn && p) { setTts(true, +p.dataset.i); return; }
     if (document.body.classList.contains("focus-mode") && !e.target.closest("a,button")) setFocus(false);
   });
-  addEventListener("beforeunload", () => synth && synth.cancel());
+  addEventListener("beforeunload", () => { synth && synth.cancel(); relBlobs(); });
 
   /* ---------- keyboard + swipe navigation ---------- */
   document.addEventListener("keydown", e => {

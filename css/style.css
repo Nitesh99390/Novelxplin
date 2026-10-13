@@ -665,6 +665,8 @@ body.reader-page.theme-light { background: #f3f4f8; }
 .float-bar button.stop { background: var(--accent); }
 .float-bar select { height: 30px; max-width: 150px; border: 0; border-radius: 999px; padding: 0 10px; background: rgba(255, 255, 255, .1); color: #fff; font: inherit; font-size: 12px; outline: 0; }
 .float-bar select option { color: #000; }
+.float-bar > span em { font-style: normal; color: #fff; margin-left: 4px; font-variant-numeric: tabular-nums; }
+.float-bar.tts #ttsEngine { max-width: 110px; }
 
 /* chapter end card */
 .chapter-end { margin-top: 36px; padding-top: 22px; border-top: 1px dashed rgba(15, 23, 42, .15); text-align: center; }

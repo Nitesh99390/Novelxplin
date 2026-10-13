@@ -37,6 +37,26 @@ Old `*.html?x=` links are **301-redirected** to the clean form, so bookmarks and
 | *(anything else)* | `404.html` | Branded 404 page (HTTP 404, `noindex`) with popular novels + genres |
 | Telegram bot | – | **Admin only** – upload novels from your phone: photo → details → `.epub` (see §4) |
 
+## Listen (text-to-speech) – runs 100 % on the reader's device
+
+The reader's **Listen** button (`L`) has three voice engines, selectable in the floating bar.
+None of them touch the Oracle server – the phone/PC talks to the voice provider directly, so a
+1 GB VM can serve thousands of listeners.
+
+| Engine | How | Notes |
+|--------|-----|-------|
+| **Edge neural** (default) | Browser opens the WebSocket Microsoft Edge "Read aloud" uses (same protocol as the `edge-tts` lib) → MP3 blob | 15 natural voices (US/UK/AU/India/Hindi). If Microsoft refuses the connection the reader auto-falls back to Google. |
+| **Google** | `translate.google.com/translate_tts` (what `gTTS` uses) streamed straight into `<audio>` | Text split into ≤190-char chunks; page switches to `no-referrer` because Google 404s on foreign referers. |
+| **Device** | `speechSynthesis` built into the browser/OS | Offline, but stops when the screen locks on most phones. |
+
+Edge/Google audio plays through one shared `<audio>` element, which means:
+* keeps playing with the **screen off / app in background**,
+* **lock-screen & headset controls** (play/pause/next/prev paragraph) via the Media Session API, with the novel cover as artwork,
+* next 2 paragraphs are pre-synthesised so there are no gaps,
+* at chapter end the **next chapter is loaded in-place** (no page reload → audio session is kept) and playback continues automatically; the URL/history/reading-history are updated.
+
+Code: `js/tts.js` (engines) + the TTS section of `js/reader.js`.
+
 ## 1. Firebase setup (5 min)
 
 1. <https://console.firebase.google.com> → Add project `novelxplin`.
