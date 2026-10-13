@@ -47,9 +47,12 @@ Chapter text is the whole product, so `GET /api/novels/:slug/chapters/:num` is g
 | **User-agent filter** – empty / short UAs and HTTP libraries & headless browsers (`python-requests`, `curl`, `wget`, `axios`, `node-fetch`, `okhttp`, `Go-http-client`, `Headless`, `Puppeteer`, `Playwright`, `Selenium`, …) get **403** | 95 % of AI-generated dump scripts |
 | **Per-IP rate limit** – `CHAPTER_LIMIT_MIN` (40/min) and `CHAPTER_LIMIT_HOUR` (500/h) → **429**; 8 violations in an hour → **1 h block** (403, logged as `[guard] blocked <ip>`) | Fast bulk download even with a real browser / valid token |
 | **Same-origin CORS** – `Access-Control-Allow-Origin` is only echoed for the site's own host (was `*`). The custom header also forces a preflight. | Other websites embedding/proxying our API from the browser |
-| Chapter index (`/chapters`) light limit 60/min, `Cache-Control: private` on chapter JSON | Shared caches re-serving chapter text |
+| Chapter index (`/chapters`) light limit 60/min, `Cache-Control: private, no-store` on chapter JSON | Shared caches re-serving chapter text |
+| **Login gate** – `GET /api/novels/:slug/chapters/:num` requires a verified Firebase ID token (`Authorization: Bearer`) → **401** `{code:"login"}` otherwise; the reader shows a "Sign in with Google" prompt. Catalog, search, finder, novel pages and chapter index stay public for SEO. | Anonymous bulk download; forces every scraper to burn a real Google account |
+| **Per-account quota** – `CHAPTER_QUOTA_DAY` (50) distinct chapters per `CHAPTER_QUOTA_WINDOW_H` (24) hours per uid → **429** `{code:"quota"}` with a clear reader message. Re-opening the same chapter, refreshes, TTS warm-up and prefetches (`X-NX-Prefetch: 1`) do **not** charge – a chapter is charged once, when it is actually opened. Persisted in `data/quota.json`. | One account reading faster than any human could |
+| **Pseudonymous watermark** – every served chapter carries `wm = HMAC(uid, WM_SECRET)` (16 chars) as invisible zero-width Unicode runs inside several paragraphs (positions derived from the id) and as DOM metadata (`<meta name="nx-wm">`, `#content[data-wm]`, hidden `.wm` span). Owner-only `POST /api/watermark {text}` decodes a leaked paragraph; `{uid}` gives an account's id. | Tracing a leaked dump back to the exact account |
 
-Env knobs: `NX_SECRET` (HMAC key; random per boot if unset – set it so tokens survive restarts, e.g. `openssl rand -hex 32`),
+Env knobs: `WM_SECRET` (watermark key; falls back to `NX_SECRET` – set it so ids are stable across restarts), `CHAPTER_QUOTA_DAY`, `CHAPTER_QUOTA_WINDOW_H`, `NX_SECRET` (HMAC key; random per boot if unset – set it so tokens survive restarts, e.g. `openssl rand -hex 32`),
 `TRUST_PROXY=1` (**only** when behind Cloudflare/nginx – takes the client IP from `CF-Connecting-IP` / `X-Forwarded-For`; without it all users would share the proxy IP and hit the limit together),
 `CHAPTER_LIMIT_MIN`, `CHAPTER_LIMIT_HOUR`.
 If a token expires on a long-open tab, `js/data.js` silently re-reads the page to fetch a fresh one – readers never see it.
@@ -204,6 +207,7 @@ Admin requests send `Authorization: Bearer <Firebase ID token>`; the server veri
 RS256 signature against Google's public certs and checks the email against `ADMIN_EMAILS`
 (owners) **or** `data/admins.json` (extra admins added from the panel).
 For local dev without Firebase: `ADMIN_DEV_TOKEN=dev node server.js` and open `/admin?dev=dev`.
+**The dev bypass is hard-disabled when `NODE_ENV=production`** (the server logs a warning and ignores the token), and the admin page ignores `?dev=` on any non-localhost host – always run production with `NODE_ENV=production` (e.g. `sudo NODE_ENV=production pm2 start server.js --name novelxplin`).
 
 ## SEO: robots.txt + sitemaps (Google Search Console)
 

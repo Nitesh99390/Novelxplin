@@ -8,6 +8,7 @@ git pull --ff-only
 NODE_ENV=development npm ci --no-audit --no-fund 2>/dev/null || NODE_ENV=development npm install --no-audit --no-fund
 npm run build
 [ -f dist/index.html ] || { echo "!! Build failed - dist/index.html not found" >&2; exit 1; }
-sudo systemctl restart novelxplin
+# Production (Oracle VPS) runs the app under root PM2, not systemd.
+sudo pm2 restart novelxplin || sudo pm2 restart all
 sleep 1
-sudo systemctl --no-pager status novelxplin | head -5
+sudo pm2 status
