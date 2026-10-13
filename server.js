@@ -215,7 +215,7 @@ const MIME = { ".html": "text/html; charset=utf-8", ".js": "application/javascri
    /sitemap.xml                     → sitemap index (lists everything below)
    /sitemap-pages.xml               → static pages + genre listing pages
    /sitemap-novels.xml              → one <url> per novel (+ cover image)
-   /sitemap-chapters-<slug>.xml     → every chapter of one novel (read.html?n=&c=)
+   /sitemap-chapters-<slug>.xml     → every chapter of one novel (/novel/<slug>/chapter-N)
    All generated from the in-memory catalog, cached for 10 min, gzip on request.
    Canonical host comes from SITE_URL env (fallback: request Host header).   */
 //   PUBLIC_URL=https://novelxplin.in  (preferred)  → else SITE_URL if it is a real
@@ -259,15 +259,14 @@ function buildPagesSitemap(base) {
   const today = isoDate();
   const out = [
     urlTag(`${base}/`, today, "daily", "1.0"),
-    urlTag(`${base}/list.html`, today, "daily", "0.8"),
-    urlTag(`${base}/list.html?sort=latest-novel`, today, "daily", "0.7"),
-    urlTag(`${base}/list.html?sort=top-rated`, today, "weekly", "0.6"),
-    urlTag(`${base}/list.html?status=completed`, today, "weekly", "0.6"),
-    urlTag(`${base}/finder.html`, today, "weekly", "0.5"),
-    urlTag(`${base}/library.html`, today, "monthly", "0.3"),
+    urlTag(`${base}/latest-novels`, today, "daily", "0.8"),
+    urlTag(`${base}/latest-release`, today, "daily", "0.7"),
+    urlTag(`${base}/most-popular`, today, "weekly", "0.7"),
+    urlTag(`${base}/completed-novels`, today, "weekly", "0.6"),
+    urlTag(`${base}/finder`, today, "weekly", "0.5"),
   ];
   const genres = [...new Set(catalog.flatMap(n => n.genres || []))].sort();
-  for (const g of genres) out.push(urlTag(`${base}/genre.html?g=${encodeURIComponent(g)}`, today, "weekly", "0.6"));
+  for (const g of genres) out.push(urlTag(`${base}/genre/${slugify(g)}`, today, "weekly", "0.6"));
   return SM_HEAD + URLSET_OPEN + out.join("\n") + `\n</urlset>\n`;
 }
 function buildNovelsSitemap(base) {
@@ -275,7 +274,7 @@ function buildNovelsSitemap(base) {
     const img = n.cover ? `    <image:image>\n      <image:loc>${xmlEsc(/^https?:/i.test(n.cover) ? n.cover : base + n.cover)}</image:loc>\n      <image:title>${xmlEsc(n.title)}</image:title>\n    </image:image>` : "";
     const freq = n.status === "Completed" ? "monthly" : "daily";
     const pri = n.hot ? "0.9" : "0.8";
-    return urlTag(`${base}/novel.html?n=${encodeURIComponent(n.slug)}`, isoDate(n.updatedAt), freq, pri, img);
+    return urlTag(`${base}/novel/${encodeURIComponent(n.slug)}`, isoDate(n.updatedAt), freq, pri, img);
   });
   return SM_HEAD + URLSET_OPEN + out.join("\n") + `\n</urlset>\n`;
 }
@@ -284,7 +283,7 @@ async function buildChaptersSitemap(base, n) {
   const freq = n.status === "Completed" ? "yearly" : "monthly";
   const out = list.map((c, i) => {
     const isLatest = i >= list.length - 3;
-    return urlTag(`${base}/read.html?n=${encodeURIComponent(n.slug)}&c=${c.num}`, isoDate(c.date ? Date.parse(c.date) : n.updatedAt), isLatest ? "weekly" : freq, isLatest ? "0.6" : "0.5");
+    return urlTag(`${base}/novel/${encodeURIComponent(n.slug)}/chapter-${c.num}`, isoDate(c.date ? Date.parse(c.date) : n.updatedAt), isLatest ? "weekly" : freq, isLatest ? "0.6" : "0.5");
   });
   return SM_HEAD + URLSET_OPEN + out.join("\n") + `\n</urlset>\n`;
 }
@@ -292,10 +291,14 @@ function buildRobots(base) {
   return [
     "User-agent: *",
     "Allow: /",
+    "Disallow: /admin",
     "Disallow: /admin.html",
     "Disallow: /api/",
+    "Disallow: /library",
     "Disallow: /library.html",
-    "Disallow: /search.html?",
+    "Disallow: /search",
+    "Disallow: /search.html",
+    "Disallow: /*.html?",
     "Disallow: /*?*q=",
     "",
     `Sitemap: ${base}/sitemap.xml`,
@@ -327,6 +330,146 @@ async function handleSEO(req, res, p) {
   return false;
 }
 const smInvalidate = () => smCache.clear(); // call whenever novels/chapters change (not on view counts)
+
+/* ---------- Clean URL routing ----------
+   Pretty paths are served by the same static HTML files; the frontend (js/app.js)
+   parses the path back into its parameters.  Legacy "*.html?n=…" URLs get a 301
+   to the clean form so old links / Google index migrate automatically.
+
+     /                                   index.html
+     /novel/<slug>[/page/N]              novel.html      (was novel.html?n=&page=)
+     /novel/<slug>/chapter-<N>           read.html       (was read.html?n=&c=)
+     /genre/<genre>[/<status>][/page/N]  genre.html      (was genre.html?g=)
+     /latest-novels /latest-release /most-popular /completed-novels [/<status>][/page/N]
+                                         list.html       (was list.html?sort=)
+     /search[/<term>][/page/N]           search.html     (was search.html?q=)
+     /library  /finder  /admin[/<slug>]  library.html finder.html admin.html
+*/
+const LIST_PATHS = { "latest-novel": "latest-novels", "latest-release": "latest-release", "most-popular": "most-popular", "completed": "completed-novels" };
+const PATH_SORTS = Object.fromEntries(Object.entries(LIST_PATHS).map(([k, v]) => [v, k]));
+const PATH_PAGES = new Set(["library", "finder", "admin"]);
+const SITE_NAME = "Novelxplin";
+const SITE_DESC = "Read web novels online for free – fast reader, library and reading history synced across devices.";
+const htmlEsc = xmlEsc;
+const pgSeg = p => p && +p > 1 ? `/page/${+p}` : "";
+const stSeg = s => s && /^(ongoing|completed)$/i.test(s) ? `/${s.toLowerCase()}` : "";
+const genreSlugName = s => { const k = slugify(s); return [...new Set(catalog.flatMap(n => n.genres || []))].find(g => slugify(g) === k) || null; };
+const titleCase = s => String(s).split("-").filter(Boolean).map(w => w[0].toUpperCase() + w.slice(1)).join(" ");
+
+// Legacy *.html URL  →  clean path (or null when it is already clean / unknown)
+function legacyToClean(p, sp) {
+  const file = p.replace(/^\//, "");
+  const n = sp.get("n"), page = sp.get("page"), status = sp.get("status");
+  switch (file) {
+    case "index.html": return "/";
+    case "novel.html": return n ? `/novel/${encodeURIComponent(n)}${pgSeg(page)}` : "/latest-novels";
+    case "read.html": return n ? `/novel/${encodeURIComponent(n)}/chapter-${safeNum(sp.get("c")) || 1}` : "/latest-novels";
+    case "genre.html": { const g = sp.get("g"); return g ? `/genre/${slugify(g)}${stSeg(status)}${pgSeg(page)}` : "/latest-novels"; }
+    case "list.html": return `/${LIST_PATHS[sp.get("sort")] || "latest-novels"}${stSeg(status)}${pgSeg(page)}`;
+    case "search.html": { const q = (sp.get("q") || "").trim(); return `/search${q ? "/" + encodeURIComponent(q) : ""}${pgSeg(page)}`; }
+    case "library.html": return "/library";
+    case "finder.html": return "/finder";
+    case "admin.html": return `/admin${n ? "/" + encodeURIComponent(n) : ""}${sp.get("dev") ? "?dev=" + encodeURIComponent(sp.get("dev")) : ""}`;
+  }
+  return null;
+}
+
+// Clean path → { file, title, desc, canonical, robots } or null (= not a page route)
+function resolveRoute(p, base) {
+  const seg = p.split("/").filter(Boolean);
+  let page = 1;
+  if (seg.length >= 2 && seg[seg.length - 2] === "page" && /^\d+$/.test(seg[seg.length - 1])) { page = +seg.pop(); seg.pop(); }
+  const [a, b, c] = seg;
+  const stTxt = s => s === "completed" ? "Completed " : s === "ongoing" ? "Ongoing " : "";
+  const sfx = page > 1 ? ` – Page ${page}` : "";
+  const R = (file, title, desc, canon, robots) => ({ file, title: `${title} - ${SITE_NAME}`, desc: desc || SITE_DESC, canonical: base + canon, robots });
+  if (!a) return R("index.html", "Read Web Novels Online Free", SITE_DESC, "/");
+  if (a === "novel" && b) {
+    const n = bySlug(b); if (!n) return { file: "novel.html", status: 404, title: `Novel not found - ${SITE_NAME}`, desc: SITE_DESC, robots: "noindex" };
+    const m = c && /^chapter-(\d+)$/.exec(c);
+    const summ = Array.isArray(n.summary) ? n.summary.join(" ") : String(n.summary || "");
+    const desc = (summ || `Read ${n.title} by ${n.author || "Unknown"} online. ${n.chapters} chapters, ${n.status}.`).replace(/\s+/g, " ").slice(0, 160);
+    if (m) {
+      if (seg.length !== 3) return null;
+      const num = +m[1];
+      return R("read.html", `${n.title} – Chapter ${num}`, `Read ${n.title} Chapter ${num} online for free on ${SITE_NAME}.`, `/novel/${encodeURIComponent(n.slug)}/chapter-${num}`);
+    }
+    if (seg.length !== 2) return null;
+    return R("novel.html", `${n.title}${sfx}`, desc, `/novel/${encodeURIComponent(n.slug)}${pgSeg(page)}`);
+  }
+  if (a === "genre" && b && seg.length <= 3) {
+    if (c && !/^(ongoing|completed)$/.test(c)) return null;
+    const g = genreSlugName(b) || titleCase(b);
+    return R("genre.html", `${stTxt(c)}${g} Novels${sfx}`, `Browse ${g.toLowerCase()} web novels – ${stTxt(c).toLowerCase()}titles sorted by latest update.`, `/genre/${slugify(b)}${stSeg(c)}${pgSeg(page)}`);
+  }
+  if (PATH_SORTS[a] && seg.length <= 2) {
+    if (b && !/^(ongoing|completed)$/.test(b)) return null;
+    const names = { "latest-novels": "Latest Novels", "latest-release": "Latest Release Novels", "most-popular": "Most Popular Novels", "completed-novels": "Completed Novels" };
+    return R("list.html", `${stTxt(b)}${names[a]}${sfx}`, `${names[a]} on ${SITE_NAME} – ${SITE_DESC}`, `/${a}${stSeg(b)}${pgSeg(page)}`);
+  }
+  if (a === "search" && seg.length <= 2) return R("search.html", b ? `Search: ${b}` : "Search", SITE_DESC, `/search${b ? "/" + encodeURIComponent(b) : ""}${pgSeg(page)}`, "noindex");
+  if (PATH_PAGES.has(a) && (seg.length === 1 || (a === "admin" && seg.length === 2))) {
+    const t = { library: "Your Library", finder: "Novel Finder", admin: "Admin" }[a];
+    return R(`${a}.html`, t, SITE_DESC, `/${a}`, a === "finder" ? undefined : "noindex");
+  }
+  return null;
+}
+
+// Serve an HTML page with per-route <title>, description, canonical + og tags injected.
+const htmlCache = new Map(); // file -> { mtime, body }
+async function sendPage(req, res, r) {
+  const abs = path.join(ROOT, r.file);
+  let st; try { st = await fsp.stat(abs); } catch { return send(res, 404, "Not found"); }
+  let hit = htmlCache.get(r.file);
+  if (!hit || hit.mtime !== st.mtimeMs) { hit = { mtime: st.mtimeMs, body: await fsp.readFile(abs, "utf8") }; htmlCache.set(r.file, hit); }
+  const meta = [
+    `<title>${htmlEsc(r.title)}</title>`,
+    `<meta name="description" content="${htmlEsc(r.desc)}">`,
+    r.canonical ? `<link rel="canonical" href="${htmlEsc(r.canonical)}">` : "",
+    r.robots ? `<meta name="robots" content="${r.robots}">` : "",
+    `<meta property="og:site_name" content="${SITE_NAME}">`,
+    `<meta property="og:type" content="website">`,
+    `<meta property="og:title" content="${htmlEsc(r.title)}">`,
+    `<meta property="og:description" content="${htmlEsc(r.desc)}">`,
+    r.canonical ? `<meta property="og:url" content="${htmlEsc(r.canonical)}">` : "",
+  ].filter(Boolean).join("\n  ");
+  // drop any static description/robots/canonical tags so the per-route ones win (no duplicates)
+  let html = hit.body
+    .replace(/[ \t]*<meta\s+name="(description|robots)"[^>]*>\s*\n?/gi, "")
+    .replace(/[ \t]*<link\s+rel="canonical"[^>]*>\s*\n?/gi, "");
+  html = /<title>/i.test(html) ? html.replace(/<title>[\s\S]*?<\/title>/i, meta) : html.replace(/<head>/i, `<head>\n  ${meta}`);
+  const buf = Buffer.from(html);
+  const headers = { "Content-Type": MIME[".html"], "Cache-Control": "no-cache" };
+  if (/\bgzip\b/.test(req.headers["accept-encoding"] || "")) { headers["Content-Encoding"] = "gzip"; return send(res, r.status || 200, zlib.gzipSync(buf), headers); }
+  return send(res, r.status || 200, buf, headers);
+}
+
+// Unknown path: HTML 404 page for browsers, plain text otherwise.
+async function notFound(req, res) {
+  if (!/text\/html/.test(req.headers.accept || "")) return send(res, 404, "Not found");
+  return sendPage(req, res, { file: "404.html", status: 404, title: `Page not found - ${SITE_NAME}`, desc: SITE_DESC, robots: "noindex" });
+}
+
+// Returns true when the request was handled (redirect or page), false → fall through to static files.
+async function handleRoutes(req, res, p, url) {
+  if (req.method !== "GET" && req.method !== "HEAD") return false;
+  // 1) legacy *.html → 301 to clean URL
+  if (/^\/[a-z]+\.html$/i.test(p)) {
+    const to = legacyToClean(p, url.searchParams);
+    if (to) { send(res, 301, "", { Location: to, "Cache-Control": "no-cache" }); return true; }
+  }
+  // 2) trailing slash / uppercase normalisation (except root)
+  if (p.length > 1 && p.endsWith("/")) { send(res, 301, "", { Location: p.replace(/\/+$/, "") + url.search }); return true; }
+  // 3) clean routes
+  const r = resolveRoute(p, siteBase(req));
+  if (!r) return false;
+  // /search?q=term (plain form submit without JS) → /search/term
+  if (r.file === "search.html" && url.searchParams.get("q") && p === "/search") {
+    const q = url.searchParams.get("q").trim();
+    send(res, 302, "", { Location: `/search${q ? "/" + encodeURIComponent(q) : ""}` }); return true;
+  }
+  await sendPage(req, res, r); return true;
+}
 
 function publicNovel(n) { const { ...o } = n; return o; }
 function sanitizeNovel(body, existing) {
@@ -517,14 +660,17 @@ async function handle(req, res) {
   // ---- SEO: robots.txt + sitemaps ----
   if (await handleSEO(req, res, p)) return;
 
+  // ---- clean URL routes + legacy redirects ----
+  if (await handleRoutes(req, res, p, url)) return;
+
   // ---- static files ----
   if (req.method !== "GET" && req.method !== "HEAD") return send(res, 405, "Method not allowed");
   let file = p === "/" ? "/index.html" : p;
   if (file.startsWith("/uploads/")) file = "/data" + file;
   const abs = path.normalize(path.join(ROOT, file));
   if (!abs.startsWith(ROOT) || abs.startsWith(DATA) && !abs.startsWith(UPLOADS) || abs.includes(path.sep + ".git")) return send(res, 403, "Forbidden");
-  let st; try { st = await fsp.stat(abs); } catch { return send(res, 404, "Not found"); }
-  if (st.isDirectory()) return send(res, 404, "Not found");
+  let st; try { st = await fsp.stat(abs); } catch { return notFound(req, res); }
+  if (st.isDirectory()) return notFound(req, res);
   const ext = path.extname(abs).toLowerCase();
   const headers = { "Content-Type": MIME[ext] || "application/octet-stream", "Cache-Control": ext === ".html" ? "no-cache" : "public, max-age=86400" };
   const gzOk = /\bgzip\b/.test(req.headers["accept-encoding"] || "") && /^(\.html|\.js|\.css|\.svg|\.json|\.txt)$/.test(ext);

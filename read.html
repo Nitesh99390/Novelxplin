@@ -5,13 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Read - Novelxplin</title>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Sora:wght@600;700&display=swap" rel="stylesheet">
-  <link rel="icon" type="image/svg+xml" href="img/favicon.svg">
-  <link rel="stylesheet" href="css/style.css?v=20261013b">
+  <link rel="icon" type="image/svg+xml" href="/img/favicon.svg">
+  <link rel="stylesheet" href="/css/style.css?v=20261013b">
 </head>
 <body class="reader-page">
   <div id="siteHeader"></div>
   <div class="reader-top"><div class="wrap">
-    <a href="index.html" title="Home"></a>
+    <a href="/" title="Home"></a>
     <span class="novel-title truncate" id="rtTitle" data-sk="title"></span>
     <a class="btn ghost" href="#" id="rtLib"></a>
     <button class="btn ghost icon-btn" id="rtSettings" title="Reader settings" aria-label="Reader settings" aria-expanded="false"></button>
@@ -45,16 +45,16 @@
   </main>
 
   <div id="siteFooter"></div>
-  <script src="js/skeleton.js?v=20261013b"></script>
+  <script src="/js/skeleton.js?v=20261013b"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
-  <script src="js/config.js?v=20261013b"></script>
-  <script src="js/data.js?v=20261013b"></script>
-  <script src="js/app.js?v=20261013b"></script>
+  <script src="/js/config.js?v=20261013b"></script>
+  <script src="/js/data.js?v=20261013b"></script>
+  <script src="/js/app.js?v=20261013b"></script>
   <script>
     document.addEventListener("app:ready", async () => {
-      const { $, $$, esc, q, I } = UI;
+      const { $, $$, esc, q, U, I } = UI;
       const n = DB.get(q.get("n"));
       const c = Math.max(1, parseInt(q.get("c") || "1", 10));
       if (!n || c > n.chapters) { SK.clear(); $("#content").innerHTML = `<div class="empty">${I.search}<div>Chapter not found.</div></div>`; return; }
@@ -66,18 +66,18 @@
       setLib();
       libBtn.addEventListener("click", e => { e.preventDefault(); const a = Lib.toggle(n.id); setLib(); toast(a ? "Added to your library" : "Removed from library"); });
 
-      const link = (cc) => `read.html?n=${n.slug}&c=${cc}`;
+      const link = (cc) => U.chapter(n.slug, cc);
       let index = [];
       try { index = await DB.chapters(n.slug); } catch { }
       const titleOf = cc => { const x = index.find(i => i.num === cc); return x && x.title ? x.title : `Chapter ${cc}`; };
       const title = titleOf(c);
       document.title = `${n.title} - ${title} | Novelxplin`;
-      $("#rtTitle").innerHTML = `<a href="novel.html?n=${n.slug}">${esc(n.title)}</a> <span style="color:var(--muted)">/ ${esc(title)}</span>`;
+      $("#rtTitle").innerHTML = `<a href="${U.novel(n.slug)}">${esc(n.title)}</a> <span style="color:var(--muted)">/ ${esc(title)}</span>`;
 
       function nav() {
         const sel = `<select onchange="location.href=this.value">${index.map(ch => `<option value="${link(ch.num)}" ${ch.num === c ? "selected" : ""}>${esc(ch.title || "Chapter " + ch.num)}</option>`).join("")}</select>`;
         return `<a class="btn alt ${c <= 1 ? "disabled" : ""}" href="${link(c - 1)}">${I.left} Prev</a>
-          <a class="btn ghost" href="novel.html?n=${n.slug}">${I.list} Index</a>
+          <a class="btn ghost" href="${U.novel(n.slug)}">${I.list} Index</a>
           ${sel}
           <a class="btn ${c >= n.chapters ? "disabled" : ""}" href="${link(c + 1)}">Next ${I.right}</a>`;
       }
