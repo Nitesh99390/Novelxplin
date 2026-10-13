@@ -89,7 +89,7 @@ document.addEventListener("app:ready", async () => {
   }
 
   /* ---------- settings ---------- */
-  const DEF = { theme: "paper", size: 18, font: "serif", lh: 1.8, width: 860, align: "left", pspace: 1.1, autoSpeed: 2, ttsRate: 1, ttsVoice: "", ttsEngine: "edge", edgeVoice: "hi-IN-SwaraNeural", gLang: "hi" };
+  const DEF = { theme: "paper", size: 18, font: "serif", lh: 1.8, width: 860, align: "left", pspace: 1.1, autoSpeed: 2, ttsRate: 1.2, ttsPitch: 0, ttsVoice: "", ttsEngine: "edge", edgeVoice: "en-US-EmmaMultilingualNeural", gLang: "hi" };
   const prefs = Object.assign({}, DEF, JSON.parse(localStorage.getItem("nx_reader") || "{}"));
   const FONTS = { serif: 'Georgia, "Times New Roman", serif', sans: '"Inter", "Roboto", "Segoe UI", Arial, sans-serif', merri: '"Merriweather", Georgia, serif', lora: '"Lora", Georgia, serif', dys: '"OpenDyslexic", "Comic Sans MS", sans-serif' };
   function apply() {
@@ -194,13 +194,31 @@ document.addEventListener("app:ready", async () => {
   const ttsBtn = $("#tTts"), ttsBar = $("#ttsBar"), sheet = $("#ttsSheet");
   const synth = window.speechSynthesis;
   const TT = window.NXTTS;
-  let ttsOn = false, ttsIdx = 0, utter = null, ttsSeq = 0, paused = false;
+  let ttsOn = false, ttsIdx = 0, utter = null, ttsSeq = 0, paused = false, follow = true;
   const pEls = () => $$("#content p[data-i]");
+  // make text pleasant to hear: drop URLs / decorative separators, tame "!!!" and "......", expand a few shorthands
+  const speakable = t => String(t || "")
+    .replace(/https?:\/\/\S+|www\.\S+/gi, "")
+    .replace(/^[\s*\-_=~#•·.]{3,}$/g, "")
+    .replace(/([!?])\1{1,}/g, "$1").replace(/\.{3,}/g, "…").replace(/[*_~`#>]+/g, " ")
+    .replace(/\b(TL|T\/N|A\/N)\s*:/gi, "Note: ").replace(/\bvs\.?\b/gi, "versus").replace(/\bMC\b/g, "main character")
+    .replace(/\s+/g, " ").trim();
+  const textOf = i => speakable(pEls()[i]?.textContent);
+  const wordsIn = t => t.split(/\s+/).filter(Boolean).length;
+  // resume point per novel+chapter
+  const POS_KEY = "nx_tts_pos";
+  const posAll = () => { try { return JSON.parse(localStorage.getItem(POS_KEY) || "{}"); } catch { return {}; } };
+  const savePos = i => { try { const a = posAll(); a[n.id] = { c, i, t: Date.now() }; const ks = Object.keys(a); if (ks.length > 40) delete a[ks.sort((x, y) => a[x].t - a[y].t)[0]]; localStorage.setItem(POS_KEY, JSON.stringify(a)); } catch { } };
+  const savedPos = () => { const p = posAll()[n.id]; return p && p.c === c ? p.i : -1; };
+  const visiblePara = () => { const mid = innerHeight * 0.4; let best = 0; for (const p of pEls()) { const r = p.getBoundingClientRect(); if (r.bottom >= mid) { best = +p.dataset.i; break; } best = +p.dataset.i; } return best; };
   const savePrefs = () => localStorage.setItem("nx_reader", JSON.stringify(prefs));
   if (!["edge", "google", "device"].includes(prefs.ttsEngine)) prefs.ttsEngine = "edge";
   if (!TT) prefs.ttsEngine = "device";
-  if (TT && !TT.has(TT.EDGE_VOICES, prefs.edgeVoice)) prefs.edgeVoice = "hi-IN-SwaraNeural";
-  if (TT && !TT.has(TT.GOOGLE_LANGS, prefs.gLang)) prefs.gLang = "hi";
+  if (TT && !TT.has(TT.EDGE_VOICES, prefs.edgeVoice)) prefs.edgeVoice = DEF.edgeVoice;
+  if (TT && !TT.has(TT.GOOGLE_LANGS, prefs.gLang)) prefs.gLang = DEF.gLang;
+  prefs.ttsRate = Math.max(.5, Math.min(2, +prefs.ttsRate || DEF.ttsRate));
+  prefs.ttsPitch = Math.max(-50, Math.min(50, Math.round(+prefs.ttsPitch || 0)));
+  savePrefs(); // persist the (possibly defaulted) voice/speed/pitch so every chapter & visit uses the same settings
   const ENGINE_NAME = { edge: "Neural", google: "Google", device: "Device" };
   const ENGINE_NOTE = {
     edge: "Natural neural voices – Hindi, English & 8 Indian languages. Works with the screen off.",
@@ -210,7 +228,7 @@ document.addEventListener("app:ready", async () => {
 
   // single shared audio element (created on user gesture so mobile allows the autoplay chain)
   const audio = document.createElement("audio"); audio.preload = "auto"; audio.setAttribute("playsinline", ""); audio.setAttribute("referrerpolicy", "no-referrer"); try { audio.referrerPolicy = "no-referrer"; } catch { } document.body.appendChild(audio);
-  const cache = new Map(); // key → Promise<url[]>
+  const cache = new Map(); // key → Promise<{urls, rate}> (rate = speed baked into the audio)
   let queue = [], qi = 0, blobUrls = [], aborters = [];
   const relBlobs = () => { blobUrls.forEach(u => { try { URL.revokeObjectURL(u); } catch { } }); blobUrls = []; };
   const abortAll = () => { aborters.forEach(a => { try { a.abort(); } catch { } }); aborters = []; };
@@ -225,6 +243,8 @@ document.addEventListener("app:ready", async () => {
     return vs.find(v => v.name === prefs.ttsVoice) || vs.find(v => /^hi/i.test(v.lang)) || vs.find(v => /^en/i.test(v.lang) && /Google|Natural|Premium/i.test(v.name)) || vs.find(v => /^en/i.test(v.lang)) || vs[0];
   }
   const voiceArg = () => prefs.ttsEngine === "edge" ? prefs.edgeVoice : prefs.gLang;
+  const relay = () => prefs.ttsEngine === "edge" || (prefs.ttsEngine === "google" && /^edge:/.test(prefs.gLang)); // audio generated by the neural relay (rate/pitch baked in)
+  const pitchLabel = () => (prefs.ttsPitch > 0 ? "+" : "") + prefs.ttsPitch + "%";
   function voiceLabel() {
     if (prefs.ttsEngine === "edge") return TT.label(TT.EDGE_VOICES, prefs.edgeVoice);
     if (prefs.ttsEngine === "google") return TT.label(TT.GOOGLE_LANGS, prefs.gLang);
@@ -232,7 +252,10 @@ document.addEventListener("app:ready", async () => {
   }
   function paintPlayer() {
     $("#ttsVoiceName").textContent = `${ENGINE_NAME[prefs.ttsEngine]} · ${voiceLabel()}`;
+    const ch = $("#ttsChap"); if (ch) ch.textContent = title;
+    const fb = $("#ttsFollow"); if (fb) fb.hidden = follow;
     $("#ttsRateVal").textContent = prefs.ttsRate + "x"; $("#tsRateVal").textContent = prefs.ttsRate + "x"; $("#tsRate").value = prefs.ttsRate;
+    const pr = $("#tsPitchRow"); if (pr) { pr.hidden = !relay() && prefs.ttsEngine !== "device"; $("#tsPitchVal").textContent = pitchLabel(); $("#tsPitch").value = prefs.ttsPitch; }
     ttsBar.classList.toggle("paused", paused);
     $("#ttsPause").setAttribute("aria-label", paused ? "Play" : "Pause");
   }
@@ -242,32 +265,60 @@ document.addEventListener("app:ready", async () => {
     $$("#tsTabs button").forEach(b => { b.classList.toggle("active", b.dataset.eng === prefs.ttsEngine); if (!TT && b.dataset.eng !== "device") b.disabled = true; });
     $("#tsNote").textContent = ENGINE_NOTE[prefs.ttsEngine];
     const list = $("#tsList"); let html = "";
-    const item = (id, name, g, sel) => `<button class="ts-voice ${sel ? "active" : ""}" data-v="${esc(id)}"><span class="ts-av ${g === "♂" ? "m" : g === "♀" ? "f" : "n"}">${g || "🔊"}</span><span>${esc(name)}</span>${sel ? '<svg class="icon" viewBox="0 0 24 24"><path d="M9 16.2 4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4z"/></svg>' : ""}</button>`;
-    if (prefs.ttsEngine === "edge") html = TT.EDGE_VOICES.map(grp => `<div class="ts-grp">${esc(grp.group)}</div>` + grp.voices.map(v => item(v[0], v[1], v[2], v[0] === prefs.edgeVoice)).join("")).join("");
-    else if (prefs.ttsEngine === "google") html = TT.GOOGLE_LANGS.map(grp => `<div class="ts-grp">${esc(grp.group)}</div>` + grp.voices.map(v => item(v[0], v[1], v[2], v[0] === prefs.gLang)).join("")).join("");
-    else { const vs = devVoices(); const cur = pickVoice(); html = vs.length ? vs.map(v => item(v.name, `${v.name.replace(/^Microsoft |^Google /, "")} · ${v.lang}`, "", cur && v.name === cur.name)).join("") : `<p class="ts-empty">No voices found on this device. Try Neural or Google.</p>`; }
+    const qs = ($("#tsFind")?.value || "").trim().toLowerCase();
+    const match = (...s) => !qs || s.join(" ").toLowerCase().includes(qs);
+    const canPreview = prefs.ttsEngine !== "device";
+    const item = (id, name, g, sel) => `<button class="ts-voice ${sel ? "active" : ""}" data-v="${esc(id)}"><span class="ts-av ${g === "♂" ? "m" : g === "♀" ? "f" : "n"}">${g || "🔊"}</span><span>${esc(name)}</span>${sel ? '<svg class="icon" viewBox="0 0 24 24"><path d="M9 16.2 4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4z"/></svg>' : ""}${canPreview ? `<span class="ts-prev" data-prev="${esc(id)}" title="Preview" role="button"><svg class="icon" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></span>` : ""}</button>`;
+    const grpHtml = (groups, cur) => groups.map(grp => { const vs = grp.voices.filter(v => match(grp.group, v[1], v[0])); return vs.length ? `<div class="ts-grp">${esc(grp.group)}</div>` + vs.map(v => item(v[0], v[1], v[2], v[0] === cur)).join("") : ""; }).join("");
+    if (prefs.ttsEngine === "edge") html = grpHtml(TT.EDGE_VOICES, prefs.edgeVoice);
+    else if (prefs.ttsEngine === "google") html = grpHtml(TT.GOOGLE_LANGS, prefs.gLang);
+    else { const vs = devVoices().filter(v => match(v.name, v.lang)); const cur = pickVoice(); html = vs.length ? vs.map(v => item(v.name, `${v.name.replace(/^Microsoft |^Google /, "")} · ${v.lang}`, "", cur && v.name === cur.name)).join("") : `<p class="ts-empty">${qs ? "No voice matches your search." : "No voices found on this device. Try Neural or Google."}</p>`; }
+    if (!html) html = `<p class="ts-empty">No voice matches “${esc(qs)}”.</p>`;
     list.innerHTML = html;
     $$("#tsSleep button").forEach(b => b.classList.toggle("active", String(sleepMode) === b.dataset.sleep));
     paintPlayer();
   }
-  const openSheet = o => { sheet.hidden = !o; document.body.classList.toggle("ts-open", o); if (o) renderSheet(); };
+  const openSheet = o => { sheet.hidden = !o; document.body.classList.toggle("ts-open", o); if (o) renderSheet(); else { try { prevAudio.pause(); } catch { } } };
   $("#ttsVoiceBtn").addEventListener("click", () => openSheet(true));
   $("#ttsRateBtn").addEventListener("click", () => { prefs.ttsRate = prefs.ttsRate >= 2 ? 0.8 : +(prefs.ttsRate + 0.2).toFixed(1); applyRate(); });
   $("#tsClose").addEventListener("click", () => openSheet(false));
   sheet.addEventListener("click", e => { if (e.target === sheet) openSheet(false); });
   $("#tsTabs").addEventListener("click", e => { const b = e.target.closest("button[data-eng]"); if (!b || b.disabled) return; prefs.ttsEngine = b.dataset.eng; savePrefs(); cache.clear(); abortAll(); renderSheet(); if (ttsOn) setTts(true, ttsIdx); });
+  $("#tsFind")?.addEventListener("input", renderSheet);
+  // voice preview: a short sample in the voice's own language, without disturbing the main playback
+  const prevAudio = document.createElement("audio"); prevAudio.setAttribute("referrerpolicy", "no-referrer"); try { prevAudio.referrerPolicy = "no-referrer"; } catch { }
+  const SAMPLE = { hi: "नमस्ते! मैं आपको यह कहानी सुनाऊँगी। क्या आप तैयार हैं?", mr: "नमस्कार! मी तुम्हाला ही गोष्ट वाचून दाखवीन.", bn: "নমস্কার! আমি আপনাকে এই গল্পটি পড়ে শোনাব।", ta: "வணக்கம்! நான் இந்தக் கதையை உங்களுக்கு வாசிக்கிறேன்.", te: "నమస్కారం! నేను మీకు ఈ కథను వినిపిస్తాను.", gu: "નમસ્તે! હું તમને આ વાર્તા વાંચી સંભળાવીશ.", kn: "ನಮಸ್ಕಾರ! ನಾನು ನಿಮಗೆ ಈ ಕಥೆಯನ್ನು ഓದಿ ಹೇಳುತ್ತೇನೆ.", ml: "നമസ്കാരം! ഞാൻ ഈ കഥ നിങ്ങൾക്കായി വായിക്കാം.", ur: "آداب! میں آپ کو یہ کہانی سناتی ہوں۔", pa: "ਸਤ ਸ੍ਰੀ ਅਕਾਲ! ਮੈਂ ਤੁਹਾਨੂੰ ਇਹ ਕਹਾਣੀ ਸੁਣਾਵਾਂਗਾ।", ne: "नमस्ते! म तपाईंलाई यो कथा सुनाउँछु।", en: "Hello! I'll be reading this story for you. Shall we begin?" };
+  let prevSeq = 0;
+  async function previewVoice(id, el) {
+    const seq = ++prevSeq; prevAudio.pause();
+    $$(".ts-prev.playing").forEach(x => x.classList.remove("playing")); el.classList.add("playing");
+    const edgeId = id.replace(/^edge:/, ""); const lang = (prefs.ttsEngine === "edge" || /^edge:/.test(id)) ? edgeId.slice(0, 2) : id.slice(0, 2);
+    const text = SAMPLE[lang] || SAMPLE.en;
+    try {
+      const urls = (prefs.ttsEngine === "edge" || /^edge:/.test(id)) ? [await TT.edge(text, edgeId, prefs.ttsRate, null, prefs.ttsPitch)] : TT.google(text, id);
+      if (seq !== prevSeq) return;
+      if (ttsOn && !paused) togglePause(true);
+      prevAudio.src = urls[0]; prevAudio.onended = () => el.classList.remove("playing"); await prevAudio.play();
+    } catch { el.classList.remove("playing"); toast("Preview unavailable"); }
+  }
   $("#tsList").addEventListener("click", e => {
+    const pv = e.target.closest(".ts-prev"); if (pv) { e.stopPropagation(); previewVoice(pv.dataset.prev, pv); return; }
     const b = e.target.closest("button[data-v]"); if (!b) return;
     if (prefs.ttsEngine === "edge") prefs.edgeVoice = b.dataset.v; else if (prefs.ttsEngine === "google") prefs.gLang = b.dataset.v; else prefs.ttsVoice = b.dataset.v;
     savePrefs(); cache.clear(); abortAll(); renderSheet(); if (ttsOn) setTts(true, ttsIdx); else toast("Voice: " + voiceLabel());
   });
   $("#tsRate").addEventListener("input", e => { prefs.ttsRate = +(+e.target.value).toFixed(1); paintPlayer(); });
   $("#tsRate").addEventListener("change", () => applyRate());
+  $("#tsPitch").addEventListener("input", e => { prefs.ttsPitch = Math.round(+e.target.value); paintPlayer(); });
+  $("#tsPitch").addEventListener("change", () => { prefs.ttsPitch = Math.max(-50, Math.min(50, Math.round(+prefs.ttsPitch || 0))); savePrefs(); paintPlayer(); if (ttsOn) { cache.clear(); abortAll(); setTts(true, ttsIdx); } });
   function applyRate() {
     prefs.ttsRate = Math.max(.5, Math.min(2, +prefs.ttsRate.toFixed(1))); savePrefs(); paintPlayer();
     if (!ttsOn) return;
-    if (prefs.ttsEngine === "google") audio.playbackRate = prefs.ttsRate; else { cache.clear(); abortAll(); setTts(true, ttsIdx); }
+    if (prefs.ttsEngine === "device") { setTts(true, ttsIdx); return; }
+    // no interruption: stretch the current clip, next paragraphs are synthesized at the new native speed
+    syncRate(); toast(`Speed ${prefs.ttsRate}x`);
   }
+  function syncRate() { try { audio.preservesPitch = true; audio.mozPreservesPitch = true; } catch { } audio.playbackRate = Math.max(.5, Math.min(4, prefs.ttsRate / (curRate || 1))); }
   if (synth) synth.onvoiceschanged = () => { if (prefs.ttsEngine === "device" && !sheet.hidden) renderSheet(); };
 
   /* ----- sleep timer ----- */
@@ -281,20 +332,44 @@ document.addEventListener("app:ready", async () => {
   });
 
   /* ----- synthesis + playback ----- */
-  const cacheKey = i => `${prefs.ttsEngine}|${voiceArg()}|${prefs.ttsEngine === "edge" ? prefs.ttsRate : 1}|${c}|${i}`;
-  async function getAudio(i) {
-    const k = cacheKey(i); if (cache.has(k)) return cache.get(k);
+  const cacheKey = (i, text) => `${prefs.ttsEngine}|${voiceArg()}|${relay() ? prefs.ttsPitch : 0}|${c}|${i}|${text.length}`;
+  async function getAudio(i, text) {
+    text = text ?? textOf(i);
+    const k = cacheKey(i, text); if (cache.has(k)) return cache.get(k);
     const ac = typeof AbortController !== "undefined" ? new AbortController() : null; if (ac) aborters.push(ac);
-    const p = TT.synthesize(prefs.ttsEngine, pEls()[i].textContent, voiceArg(), prefs.ttsRate, ac && ac.signal).then(urls => { if (prefs.ttsEngine === "edge") blobUrls.push(...urls); return urls; });
+    const rate = relay() ? prefs.ttsRate : 1;
+    const p = TT.synthesize(prefs.ttsEngine, text, voiceArg(), rate, ac && ac.signal, prefs.ttsPitch).then(urls => { if (relay()) blobUrls.push(...urls); return { urls, rate }; });
     cache.set(k, p); p.catch(() => cache.delete(k)).finally(() => { aborters = aborters.filter(a => a !== ac); });
-    if (cache.size > 12) cache.delete(cache.keys().next().value);
+    if (cache.size > 14) cache.delete(cache.keys().next().value);
     return p;
+  }
+  // warm the server cache for the first lines of the next chapter so auto-continue is seamless
+  let nextWarm = 0;
+  function warmNext() {
+    if (nextWarm === c || c >= n.chapters || !relay()) return; nextWarm = c;
+    DB.chapter(n.slug, c + 1).then(ch => { const body = Array.isArray(ch.body) ? ch.body : String(ch.body || "").split(/\n{2,}|\n/).filter(Boolean); body.slice(0, 2).map(speakable).filter(Boolean).forEach(t => TT.edge(t, voiceArg().replace(/^edge:/, ""), prefs.ttsRate, null, prefs.ttsPitch).then(u => { try { URL.revokeObjectURL(u); } catch { } }).catch(() => { })); }).catch(() => { });
+  }
+  const WPM = 165; // neural voices at 1x
+  function remaining(i) {
+    const els = pEls(); let w = 0; for (let k = i; k < els.length; k++) w += wordsIn(els[k].textContent);
+    const m = Math.round(w / (WPM * prefs.ttsRate)); return m < 1 ? "<1 min" : m >= 60 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${m} min`;
   }
   function highlight(i) {
     const els = pEls(); els.forEach(p => p.classList.remove("speaking"));
-    if (els[i]) { els[i].classList.add("speaking"); if (document.visibilityState === "visible") els[i].scrollIntoView({ block: "center", behavior: "smooth" }); }
-    setStatus(`${i + 1} / ${els.length}`); $("#ttsTrack").style.width = (els.length ? ((i + 1) / els.length) * 100 : 0) + "%";
+    if (els[i]) { els[i].classList.add("speaking"); if (follow && document.visibilityState === "visible") { autoScrolling = true; els[i].scrollIntoView({ block: "center", behavior: "smooth" }); clearTimeout(asT); asT = setTimeout(() => autoScrolling = false, 900); } }
+    setStatus(`${i + 1}/${els.length} · ${remaining(i)} left`); $("#ttsTrack").style.width = (els.length ? ((i + 1) / els.length) * 100 : 0) + "%";
+    savePos(i);
   }
+  // user scrolls away while listening → stop auto-centering, show "Now playing ↓" to jump back
+  let autoScrolling = false, asT = 0;
+  const userScrolled = () => { if (!ttsOn || autoScrolling || !follow) return; follow = false; paintPlayer(); };
+  addEventListener("wheel", userScrolled, { passive: true }); addEventListener("touchmove", userScrolled, { passive: true });
+  const refollow = () => { follow = true; paintPlayer(); const p = pEls()[ttsIdx]; if (p) { autoScrolling = true; p.scrollIntoView({ block: "center", behavior: "smooth" }); clearTimeout(asT); asT = setTimeout(() => autoScrolling = false, 900); } };
+  $("#ttsFollow")?.addEventListener("click", refollow);
+  // tap on the progress track → jump to that paragraph
+  const trackEl = $(".tp-track");
+  const seekTo = e => { const r = trackEl.getBoundingClientRect(); const x = (e.touches ? e.touches[0].clientX : e.clientX) - r.left; const els = pEls(); const i = Math.max(0, Math.min(els.length - 1, Math.floor(x / r.width * els.length))); follow = true; setTts(true, i); };
+  trackEl?.addEventListener("click", seekTo);
   const setStatus = t => { const s = $("#ttsStatus"); if (s) s.textContent = t; };
   function setMedia(state) {
     if (!("mediaSession" in navigator)) return;
@@ -310,9 +385,10 @@ document.addEventListener("app:ready", async () => {
       navigator.mediaSession.setActionHandler("seekforward", () => setTts(true, ttsIdx + 1));
     } catch { }
   }
+  let curRate = 1; // speed baked into the clip currently playing
   function playQueue(seq) {
     if (seq !== ttsSeq || qi >= queue.length) return;
-    audio.src = queue[qi]; audio.playbackRate = prefs.ttsEngine === "google" ? prefs.ttsRate : 1;
+    audio.src = queue[qi]; syncRate();
     audio.play().catch(() => { if (seq === ttsSeq) { toast("Tap ▶ to start listening"); togglePause(true); } });
   }
   audio.addEventListener("ended", () => { if (audio.src === SILENCE) return; qi++; if (qi < queue.length) playQueue(ttsSeq); else if (ttsOn) speak(ttsIdx + 1); });
@@ -339,19 +415,24 @@ document.addEventListener("app:ready", async () => {
     if (prefs.ttsEngine === "device") {
       if (!synth) { toast("Device voice not supported here – switch to Neural/Google"); openSheet(true); return; }
       synth.cancel();
-      utter = new SpeechSynthesisUtterance(els[i].textContent);
-      utter.rate = prefs.ttsRate; const v = pickVoice(); if (v) { utter.voice = v; utter.lang = v.lang; }
+      const dt = textOf(i); if (!dt) { speak(i + 1); return; }
+      utter = new SpeechSynthesisUtterance(dt);
+      utter.rate = prefs.ttsRate; utter.pitch = Math.max(0, Math.min(2, 1 + prefs.ttsPitch / 50)); const v = pickVoice(); if (v) { utter.voice = v; utter.lang = v.lang; }
       utter.onend = () => { if (ttsOn && seq === ttsSeq) speak(i + 1); };
       utter.onerror = e => { if (e.error !== "interrupted" && e.error !== "canceled") setTts(false); };
       synth.speak(utter); setMedia("playing"); return;
     }
     ttsBar.classList.add("loading");
+    const text = textOf(i);
+    if (!text) { speak(i + 1); return; } // decorative separator / empty line
     try {
-      queue = await getAudio(i); qi = 0;
+      const got = await getAudio(i, text); qi = 0;
       if (seq !== ttsSeq || !ttsOn) return;
+      queue = got.urls; curRate = got.rate;
       ttsBar.classList.remove("loading"); edgeFails = 0;
       playQueue(seq); setMedia("playing");
-      for (let k = 1; k <= 2; k++) if (i + k < els.length) getAudio(i + k).catch(() => { }); // prefetch so playback never stalls
+      for (let k = 1; k <= 3; k++) if (i + k < els.length) getAudio(i + k).catch(() => { }); // prefetch so playback never stalls
+      if (i + 4 >= els.length) warmNext();
     } catch (e) {
       if (seq !== ttsSeq) return;
       ttsBar.classList.remove("loading");
@@ -371,27 +452,35 @@ document.addEventListener("app:ready", async () => {
     if ("mediaSession" in navigator) navigator.mediaSession.playbackState = p ? "paused" : "playing";
   }
   function setTts(on, from) {
-    ttsOn = on; ttsBtn.classList.toggle("active", on); ttsBar.hidden = !on; document.body.classList.toggle("tts-on", on);
+    const wasOn = ttsOn; ttsOn = on; ttsBtn.classList.toggle("active", on); ttsBar.hidden = !on; document.body.classList.toggle("tts-on", on);
     ttsSeq++; if (synth) synth.cancel(); abortAll();
     audio.pause();
     if (on && prefs.ttsEngine !== "device") unlock(); else { audio.removeAttribute("src"); audio.load(); }
+    if (on && from == null && !wasOn) { // fresh start → resume where you left off, else from what's on screen
+      const sp = savedPos(), vp = visiblePara();
+      if (sp > 0 && sp < pEls().length - 1) { ttsIdx = sp; toast(`Resuming from paragraph ${sp + 1}`); }
+      else ttsIdx = vp;
+      follow = true;
+    }
     if (on) { paintPlayer(); speak(from ?? ttsIdx); }
     else { openSheet(false); clearTimeout(sleepT); sleepMode = 0; pEls().forEach(p => p.classList.remove("speaking")); relBlobs(); cache.clear(); ttsBar.classList.remove("loading"); if ("mediaSession" in navigator) navigator.mediaSession.playbackState = "none"; }
   }
   ttsBtn.addEventListener("click", () => setTts(!ttsOn));
   ttsBar.addEventListener("click", e => {
     const b = e.target.closest("button"); if (!b) return;
-    if (b.id === "ttsPrev") setTts(true, Math.max(0, ttsIdx - 1));
-    if (b.id === "ttsNext") setTts(true, ttsIdx + 1);
+    if (b.id === "ttsPrev") { follow = true; setTts(true, Math.max(0, ttsIdx - 1)); }
+    if (b.id === "ttsNext") { follow = true; setTts(true, ttsIdx + 1); }
     if (b.id === "ttsStop") setTts(false);
     if (b.id === "ttsPause") togglePause(!paused);
   });
   // click a paragraph while TTS is on → start reading from there
   content.addEventListener("click", e => {
     const p = e.target.closest("p[data-i]");
-    if (ttsOn && p) { setTts(true, +p.dataset.i); return; }
+    if (ttsOn && p) { follow = true; setTts(true, +p.dataset.i); return; }
     if (document.body.classList.contains("focus-mode") && !e.target.closest("a,button")) setFocus(false);
   });
+  // double-tap a paragraph → start listening from there
+  content.addEventListener("dblclick", e => { const p = e.target.closest("p[data-i]"); if (p && !ttsOn) { getSelection()?.removeAllRanges(); follow = true; setTts(true, +p.dataset.i); } });
   paintPlayer();
   addEventListener("beforeunload", () => { synth && synth.cancel(); relBlobs(); });
 
@@ -400,6 +489,8 @@ document.addEventListener("app:ready", async () => {
     if (e.target.tagName === "TEXTAREA" || e.target.tagName === "INPUT" || e.target.tagName === "SELECT" || e.ctrlKey || e.metaKey || e.altKey) return;
     if (e.key === "Escape") { if (!sheet.hidden) openSheet(false); else if (!panel.hidden) setOpen(false); else if (document.body.classList.contains("focus-mode")) setFocus(false); }
     if (e.key === " " && ttsOn) { e.preventDefault(); togglePause(!paused); }
+    if (ttsOn && (e.key === "[" || e.key === "]")) { follow = true; setTts(true, e.key === "[" ? Math.max(0, ttsIdx - 1) : ttsIdx + 1); return; }
+    if (ttsOn && (e.key === "," || e.key === ".")) { prefs.ttsRate = +(prefs.ttsRate + (e.key === "." ? .1 : -.1)).toFixed(1); applyRate(); return; }
     if (e.key === "ArrowLeft" && c > 1) location.href = link(c - 1);
     if (e.key === "ArrowRight" && c < n.chapters) location.href = link(c + 1);
     const k = e.key.toLowerCase();

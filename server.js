@@ -675,20 +675,21 @@ async function handle(req, res) {
     //   GET /api/tts?voice=hi-IN-SwaraNeural&rate=1.1&q=<text>   or   POST {voice, rate, text}
     if (seg[1] === "tts") {
       if (req.method !== "GET" && req.method !== "POST") return send(res, 405, { error: "Method not allowed" });
-      let voice, rate, text;
-      if (req.method === "POST") { const b = await readJSON(req, 64 * 1024); voice = b.voice; rate = b.rate; text = b.text; }
-      else { voice = url.searchParams.get("voice"); rate = url.searchParams.get("rate"); text = url.searchParams.get("q"); }
+      let voice, rate, text, pitch;
+      if (req.method === "POST") { const b = await readJSON(req, 64 * 1024); voice = b.voice; rate = b.rate; text = b.text; pitch = b.pitch; }
+      else { voice = url.searchParams.get("voice"); rate = url.searchParams.get("rate"); text = url.searchParams.get("q"); pitch = url.searchParams.get("pitch"); }
       voice = String(voice || "en-US-AriaNeural").trim(); rate = Math.max(0.5, Math.min(2, +rate || 1));
+      pitch = Math.max(-50, Math.min(50, Math.round(+pitch || 0))); // percent, 0 = natural
       text = String(text || "").replace(/\s+/g, " ").trim().slice(0, 1500);
       if (!edgeTTS.VOICE_RE.test(voice)) return send(res, 400, { error: "Invalid voice" });
       if (!text) return send(res, 400, { error: "Missing text" });
-      const key = crypto.createHash("sha1").update(`${voice}|${rate}|${text}`).digest("hex");
+      const key = crypto.createHash("sha1").update(`${voice}|${rate}|${pitch}|${text}`).digest("hex");
       const hit = ttsCache.get(key);
       if (hit && hit.exp > Date.now()) { hit.exp = Date.now() + TTS_TTL; return send(res, 200, hit.buf, { "Content-Type": "audio/mpeg", "Cache-Control": "public, max-age=86400", "X-TTS-Cache": "HIT" }); }
       if (ttsBusy >= TTS_MAX) return send(res, 503, { error: "Voice server busy – try again" }, { "Retry-After": "2" });
       ttsBusy++;
       try {
-        const buf = await edgeTTS.synthesize(text, voice, { rate, timeout: 25000 });
+        const buf = await edgeTTS.synthesize(text, voice, { rate, pitch: (pitch >= 0 ? "+" : "") + pitch + "%", timeout: 25000 });
         ttsCache.set(key, { buf, exp: Date.now() + TTS_TTL }); ttsEvict();
         return send(res, 200, buf, { "Content-Type": "audio/mpeg", "Cache-Control": "public, max-age=86400", "X-TTS-Cache": "MISS" });
       } catch (e) {
