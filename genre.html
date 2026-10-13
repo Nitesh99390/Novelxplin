@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Genre - Novelxplin</title>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Sora:wght@600;700&display=swap" rel="stylesheet">
-  <link rel="icon" type="image/svg+xml" href="img/favicon.svg">
-  <link rel="stylesheet" href="css/style.css?v=20261013b">
+  <link rel="icon" type="image/svg+xml" href="/img/favicon.svg">
+  <link rel="stylesheet" href="/css/style.css?v=20261013b">
 </head>
 <body>
   <div id="siteHeader"></div>
@@ -36,31 +36,31 @@
     </div>
   </main>
   <div id="siteFooter"></div>
-  <script src="js/skeleton.js?v=20261013b"></script>
+  <script src="/js/skeleton.js?v=20261013b"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
-  <script src="js/config.js?v=20261013b"></script>
-  <script src="js/data.js?v=20261013b"></script>
-  <script src="js/app.js?v=20261013b"></script>
+  <script src="/js/config.js?v=20261013b"></script>
+  <script src="/js/data.js?v=20261013b"></script>
+  <script src="/js/app.js?v=20261013b"></script>
   <script>
     document.addEventListener("app:ready", () => {
-      const { $, esc, q, nCard, genreGrid, rankList, pagination, breadcrumb, I } = UI;
+      const { $, esc, q, U, nCard, genreGrid, rankList, pagination, breadcrumb, I } = UI;
       const PER = 18;
       const page = Math.max(1, parseInt(q.get("page") || "1", 10));
       const sort = q.get("sort") || "latest-novel";
-      const genre = q.get("g");
+      const genre = q.get("g") ? DB.genreName(q.get("g")) : null;
       const query = q.get("q");
       const status = q.get("status") || "all";
 
-      let list, title, crumbLabel, base;
+      let list, title, crumbLabel, mk, tabUrl;
       if (query !== null) {
         list = DB.search(query);
-        title = `Search results for "${query}"`; crumbLabel = "Search"; base = `search.html?q=${encodeURIComponent(query)}`;
+        title = `Search results for "${query}"`; crumbLabel = "Search"; mk = p => U.search(query, status, p); tabUrl = s => U.search(query, s);
         document.title = `Search: ${query} - Novelxplin`;
       } else if (genre) {
         list = DB.byGenre(genre);
-        title = `${genre} Novels`; crumbLabel = genre; base = `genre.html?g=${encodeURIComponent(genre)}`;
+        title = `${genre} Novels`; crumbLabel = genre; mk = p => U.genre(genre, status, p); tabUrl = s => U.genre(genre, s);
         document.title = `${genre} Novels - Novelxplin`;
       } else {
         const map = {
@@ -70,7 +70,7 @@
           "completed": ["Completed Novels", DB.completed()]
         };
         const m = map[sort] || map["latest-novel"];
-        title = m[0]; list = m[1]; crumbLabel = m[0]; base = `list.html?sort=${sort}`;
+        title = m[0]; list = m[1]; crumbLabel = m[0]; mk = p => U.list(sort, status, p); tabUrl = s => U.list(sort, s);
         document.title = `${m[0]} - Novelxplin`;
       }
       if (status !== "all") list = list.filter(n => n.status.toLowerCase() === status);
@@ -78,10 +78,9 @@
       const pages = Math.max(1, Math.ceil(list.length / PER));
       const cur = Math.min(page, pages);
       const slice = list.slice((cur - 1) * PER, cur * PER);
-      const mk = p => `${base}${base.includes("?") ? "&" : "?"}status=${status}&page=${p}`;
-      const tab = (s, label) => `<a href="${base}${base.includes("?") ? "&" : "?"}status=${s}" class="${status === s ? "active" : ""}">${label}</a>`;
+      const tab = (s, label) => `<a href="${tabUrl(s)}" class="${status === s ? "active" : ""}">${label}</a>`;
 
-      $("#crumb").innerHTML = breadcrumb([{ label: "Home", href: "index.html" }, { label: crumbLabel }]);
+      $("#crumb").innerHTML = breadcrumb([{ label: "Home", href: U.home }, { label: crumbLabel }]);
       $("#title").innerHTML = `${I.list} ${esc(title)}`;
       $("#count").textContent = `${list.length} novels`;
       $("#tabs").innerHTML = tab("all", "All") + tab("ongoing", "Ongoing") + tab("completed", "Completed");

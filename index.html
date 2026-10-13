@@ -7,8 +7,8 @@
   <meta name="description" content="Read Novels Online & Discover Free Stories. Latest release novels, completed novels and all genres.">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Sora:wght@600;700&display=swap" rel="stylesheet">
-  <link rel="icon" type="image/svg+xml" href="img/favicon.svg">
-  <link rel="stylesheet" href="css/style.css?v=20261013b">
+  <link rel="icon" type="image/svg+xml" href="/img/favicon.svg">
+  <link rel="stylesheet" href="/css/style.css?v=20261013b">
   <meta name="google-site-verification" content="5XIfRumeN4WPr1tvJZEMVvmIWbChDgXFXkTDDseFw9s" />
 </head>
 <body>
@@ -22,7 +22,7 @@
       <div class="grid-2">
         <div>
           <section class="panel">
-            <div class="panel-head"><h2 id="lrTitle" data-sk="title"></h2><a class="more" href="list.html?sort=latest-release">See more</a></div>
+            <div class="panel-head"><h2 id="lrTitle" data-sk="title"></h2><a class="more" href="/latest-release">See more</a></div>
             <ul class="release-list" id="latestRelease" data-sk="release:14"></ul>
           </section>
         </div>
@@ -30,10 +30,10 @@
           <section class="panel">
             <div class="panel-head"><h2 id="gTitle" data-sk="title"></h2></div>
             <div id="genres" data-sk="genres"></div>
-            <a class="see-more" href="list.html?sort=most-popular">See more</a>
+            <a class="see-more" href="/most-popular">See more</a>
           </section>
           <section class="panel">
-            <div class="panel-head"><h2 id="rTitle" data-sk="title"></h2><a class="more" href="list.html?sort=most-popular">See more</a></div>
+            <div class="panel-head"><h2 id="rTitle" data-sk="title"></h2><a class="more" href="/most-popular">See more</a></div>
             <div id="ranking" data-sk="rank:8"></div>
           </section>
         </aside>
@@ -42,17 +42,17 @@
       <div class="grid-2" style="margin-top:14px">
         <div style="display:flex;flex-direction:column;gap:14px">
           <section class="panel">
-            <div class="panel-head"><h2 id="lnTitle" data-sk="title"></h2><a class="more" href="list.html?sort=latest-novel">See more</a></div>
+            <div class="panel-head"><h2 id="lnTitle" data-sk="title"></h2><a class="more" href="/latest-novels">See more</a></div>
             <div class="novel-grid" id="latestNovels" data-sk="grid:6"></div>
           </section>
           <section class="panel">
-            <div class="panel-head"><h2 id="cTitle" data-sk="title"></h2><a class="more" href="list.html?sort=completed">See more</a></div>
+            <div class="panel-head"><h2 id="cTitle" data-sk="title"></h2><a class="more" href="/completed-novels">See more</a></div>
             <div class="novel-grid" id="completed" data-sk="grid:6"></div>
           </section>
         </div>
         <aside class="sidebar-stack">
           <section class="panel">
-            <div class="panel-head"><h2 id="hTitle" data-sk="title"></h2><a class="more" href="library.html">Library</a></div>
+            <div class="panel-head"><h2 id="hTitle" data-sk="title"></h2><a class="more" href="/library">Library</a></div>
             <div id="history" data-sk="lib:3"></div>
           </section>
         </aside>
@@ -62,33 +62,33 @@
 
   <div id="siteFooter"></div>
 
-  <script src="js/skeleton.js?v=20261013b"></script>
+  <script src="/js/skeleton.js?v=20261013b"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
-  <script src="js/config.js?v=20261013b"></script>
-  <script src="js/data.js?v=20261013b"></script>
-  <script src="js/app.js?v=20261013b"></script>
+  <script src="/js/config.js?v=20261013b"></script>
+  <script src="/js/data.js?v=20261013b"></script>
+  <script src="/js/app.js?v=20261013b"></script>
   <script>
     document.addEventListener("app:ready", () => {
-      const { $, esc, cover, stars, metaLines, nCard, releaseRow, rankList, genreGrid, I } = UI;
+      const { $, esc, U, cover, stars, metaLines, nCard, releaseRow, rankList, genreGrid, I } = UI;
 
       // Featured block: 1 big + 6 small
       const feat = DB.featured();
-      if (!feat.length) { $("#featured").innerHTML = `<div class="panel" style="grid-column:1/-1"><div class="empty">${I.book}<div>No novels yet.${Auth.isAdmin() ? ' <a href="admin.html" style="color:var(--link)">Upload your first novel</a>.' : ' Check back soon!'}</div></div></div>`; }
+      if (!feat.length) { $("#featured").innerHTML = `<div class="panel" style="grid-column:1/-1"><div class="empty">${I.book}<div>No novels yet.${Auth.isAdmin() ? ' <a href="/admin" style="color:var(--link)">Upload your first novel</a>.' : ' Check back soon!'}</div></div></div>`; }
       const big = feat[0] || { color: "#334155", glyph: "📜", slug: "", title: "", rating: 0, genres: [], lang: "", chapters: 0 };
       const bigHtml = `<div class="panel big">
         <div class="cover${big.cover ? " has-img" : ""}" style="background:${big.color}">
           ${big.cover ? `<img src="${esc(big.cover)}" alt="">` : ""}
-          <a href="novel.html?n=${big.slug}" style="position:absolute;inset:0;z-index:1" aria-label="${esc(big.title)}"></a>
+          <a href="${U.novel(big.slug)}" style="position:absolute;inset:0;z-index:1" aria-label="${esc(big.title)}"></a>
           <span class="glyph">${big.glyph}</span>
           <div class="big-info">
-            <h3><a href="novel.html?n=${big.slug}">${esc(big.title)}</a></h3>
+            <h3><a href="${U.novel(big.slug)}">${esc(big.title)}</a></h3>
             ${stars(big.rating)}
             ${metaLines(big)}
           </div>
         </div></div>`;
-      const small = feat.slice(1).map(n => `<div class="panel f-card">${cover(n)}<div><h3 class="truncate"><a href="novel.html?n=${n.slug}">${esc(n.title)}</a></h3>${stars(n.rating)}${metaLines(n)}</div></div>`).join("");
+      const small = feat.slice(1).map(n => `<div class="panel f-card">${cover(n)}<div><h3 class="truncate"><a href="${U.novel(n.slug)}">${esc(n.title)}</a></h3>${stars(n.rating)}${metaLines(n)}</div></div>`).join("");
       if (feat.length) $("#featured").innerHTML = bigHtml + small;
 
       // Latest release
@@ -115,7 +115,7 @@
       $("#hTitle").innerHTML = `${I.clock} Continue Reading`;
       const hist = Object.entries(Lib.history()).sort((a, b) => b[1].at - a[1].at).slice(0, 6);
       $("#history").innerHTML = hist.length
-        ? `<ul class="lib-list">${hist.map(([id, h]) => { const n = DB.get(id); if (!n) return ""; return `<li>${cover(n)}<div><div class="t truncate"><a href="novel.html?n=${n.slug}">${esc(n.title)}</a></div><div class="s">Last read: <a href="read.html?n=${n.slug}&c=${h.chap}">Chapter ${h.chap}</a></div></div><a class="rm" href="read.html?n=${n.slug}&c=${h.chap}">${I.right}</a></li>`; }).join("")}</ul>`
+        ? `<ul class="lib-list">${hist.map(([id, h]) => { const n = DB.get(id); if (!n) return ""; return `<li>${cover(n)}<div><div class="t truncate"><a href="${U.novel(n.slug)}">${esc(n.title)}</a></div><div class="s">Last read: <a href="${U.chapter(n.slug, h.chap)}">Chapter ${h.chap}</a></div></div><a class="rm" href="${U.chapter(n.slug, h.chap)}">${I.right}</a></li>`; }).join("")}</ul>`
         : `<div class="empty">${I.book}<div>No reading history yet.<br>Start a novel and it will show up here.</div></div>`;
     });
   </script>
