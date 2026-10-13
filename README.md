@@ -37,17 +37,20 @@ Old `*.html?x=` links are **301-redirected** to the clean form, so bookmarks and
 | *(anything else)* | `404.html` | Branded 404 page (HTTP 404, `noindex`) with popular novels + genres |
 | Telegram bot | – | **Admin only** – upload novels from your phone: photo → details → `.epub` (see §4) |
 
-## Listen (text-to-speech) – runs 100 % on the reader's device
+## Listen (text-to-speech) – Hindi + Indian-language neural voices
 
-The reader's **Listen** button (`L`) has three voice engines, selectable in the floating bar.
-None of them touch the Oracle server – the phone/PC talks to the voice provider directly, so a
-1 GB VM can serve thousands of listeners.
+The reader's **Listen** button (`L`) opens a bottom **player card** (play/pause, prev/next paragraph,
+progress track, speed chip, voice chip). Tapping the voice chip opens a **Voice & speed sheet** with
+three engines, grouped voice list, speed slider and a sleep timer (15/30/60 min or "chapter end").
+Default voice is **Swara (Hindi)**.
 
-| Engine | How | Notes |
-|--------|-----|-------|
-| **Edge neural** (default) | Browser opens the WebSocket Microsoft Edge "Read aloud" uses (same protocol as the `edge-tts` lib) → MP3 blob | 15 natural voices (US/UK/AU/India/Hindi). If Microsoft refuses the connection the reader auto-falls back to Google. |
-| **Google** | `translate.google.com/translate_tts` (what `gTTS` uses) streamed straight into `<audio>` | Text split into ≤190-char chunks; page switches to `no-referrer` because Google 404s on foreign referers. |
-| **Device** | `speechSynthesis` built into the browser/OS | Offline, but stops when the screen locks on most phones. |
+| Engine | How | Voices |
+|--------|-----|--------|
+| **Neural** (default) | Microsoft Edge "Read aloud" voices. Since Oct-2026 Microsoft only accepts the Edge browser itself (needs the new `Sec-MS-GEC` **v2** token + Edge User-Agent), so browsers get **403**. `lib/edgetts.js` (zero deps) speaks the protocol from the server and `GET /api/tts?voice=&rate=&q=` streams back MP3 (~50 KB / paragraph, ≈0.7 s). 10-min in-memory cache (≤6 MB), max `TTS_MAX_PARALLEL` (8) concurrent synths, 1500-char cap → safe on a 1 GB VM. | Hindi (Swara, Madhur), 4 multilingual, English India/US/UK/AU, Marathi, Bengali, Tamil, Telugu, Gujarati, Kannada, Malayalam, Urdu – 40 voices |
+| **Google** | `translate.google.com/translate_tts` (what `gTTS` uses) streamed straight into `<audio>` – zero server load. ≤190-char chunks; page switches to `no-referrer`. | Hindi, English ×4, Marathi, Bengali, Tamil, Telugu, Gujarati, Kannada, Malayalam, Punjabi, Urdu, Nepali |
+| **Device** | `speechSynthesis` built into the browser/OS | Whatever is installed (Hindi first). Offline, but may stop when the screen locks. |
+
+Fallback chain: Neural fails → 2 quick retries → Google (same language) → Device.
 
 Edge/Google audio plays through one shared `<audio>` element, which means:
 * keeps playing with the **screen off / app in background**,
@@ -252,6 +255,7 @@ npm run dev          # http://localhost:3000  (admin: /admin?dev=dev)
 server.js            Node backend + static file server (+ starts Telegram bot when TELEGRAM_BOT_TOKEN set)
 lib/bot.js           Telegram upload bot (long polling, photo → details → epub)
 lib/epub.js          Zero-dependency EPUB parser (ZIP + XHTML → chapters) used by the bot
+lib/edgetts.js       Zero-dependency Edge neural TTS client (Sec-MS-GEC v2 token + RFC-6455 WebSocket) behind /api/tts
 js/skeleton.js       Sync skeleton painter – fills #siteHeader + every [data-sk] before data arrives (window.SK)
 js/config.js         Firebase config, owner email(s), API base
 js/data.js           API client (window.DB)

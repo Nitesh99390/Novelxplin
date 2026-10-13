@@ -89,7 +89,7 @@ document.addEventListener("app:ready", async () => {
   }
 
   /* ---------- settings ---------- */
-  const DEF = { theme: "paper", size: 18, font: "serif", lh: 1.8, width: 860, align: "left", pspace: 1.1, autoSpeed: 2, ttsRate: 1, ttsVoice: "", ttsEngine: "edge", edgeVoice: "en-US-AriaNeural", gLang: "en" };
+  const DEF = { theme: "paper", size: 18, font: "serif", lh: 1.8, width: 860, align: "left", pspace: 1.1, autoSpeed: 2, ttsRate: 1, ttsVoice: "", ttsEngine: "edge", edgeVoice: "hi-IN-SwaraNeural", gLang: "hi" };
   const prefs = Object.assign({}, DEF, JSON.parse(localStorage.getItem("nx_reader") || "{}"));
   const FONTS = { serif: 'Georgia, "Times New Roman", serif', sans: '"Inter", "Roboto", "Segoe UI", Arial, sans-serif', merri: '"Merriweather", Georgia, serif', lora: '"Lora", Georgia, serif', dys: '"OpenDyslexic", "Comic Sans MS", sans-serif' };
   function apply() {
@@ -185,12 +185,13 @@ document.addEventListener("app:ready", async () => {
   });
   ["wheel", "touchstart"].forEach(ev => addEventListener(ev, () => { if (autoOn) { acc = 0; } }, { passive: true }));
 
-  // text-to-speech – 3 engines, all run on the user's device (zero server load)
-  //   edge   : Microsoft neural voices via WebSocket (edge-tts protocol)
-  //   google : Google Translate voice (gTTS)             device : browser speechSynthesis
-  // Edge/Google audio is played through a single <audio> element → keeps playing with the
-  // screen off / app in background, lock-screen controls via Media Session, auto next chapter.
-  const ttsBtn = $("#tTts"), ttsBar = $("#ttsBar");
+  // ---------- Listen (text-to-speech) ----------
+  //   edge   : Microsoft neural voices (Hindi + 14 Indian/English) relayed by the server (/api/tts)
+  //   google : Google Translate voice (gTTS) – plays straight from Google, zero server load
+  //   device : browser speechSynthesis (offline)
+  // Edge/Google audio goes through one <audio> element → keeps playing with the screen off,
+  // lock-screen controls via Media Session, auto next chapter, sleep timer.
+  const ttsBtn = $("#tTts"), ttsBar = $("#ttsBar"), sheet = $("#ttsSheet");
   const synth = window.speechSynthesis;
   const TT = window.NXTTS;
   let ttsOn = false, ttsIdx = 0, utter = null, ttsSeq = 0, paused = false;
@@ -198,48 +199,103 @@ document.addEventListener("app:ready", async () => {
   const savePrefs = () => localStorage.setItem("nx_reader", JSON.stringify(prefs));
   if (!["edge", "google", "device"].includes(prefs.ttsEngine)) prefs.ttsEngine = "edge";
   if (!TT) prefs.ttsEngine = "device";
+  if (TT && !TT.has(TT.EDGE_VOICES, prefs.edgeVoice)) prefs.edgeVoice = "hi-IN-SwaraNeural";
+  if (TT && !TT.has(TT.GOOGLE_LANGS, prefs.gLang)) prefs.gLang = "hi";
+  const ENGINE_NAME = { edge: "Neural", google: "Google", device: "Device" };
+  const ENGINE_NOTE = {
+    edge: "Natural neural voices – Hindi, English & 8 Indian languages. Works with the screen off.",
+    google: "Google Translate voice. Light & fast, plays directly from Google.",
+    device: "Voices installed on this phone/PC. Works offline, but may stop when the screen locks."
+  };
 
-  // single shared audio element (created on user gesture so mobile allows autoplay chain)
+  // single shared audio element (created on user gesture so mobile allows the autoplay chain)
   const audio = document.createElement("audio"); audio.preload = "auto"; audio.setAttribute("playsinline", ""); audio.setAttribute("referrerpolicy", "no-referrer"); try { audio.referrerPolicy = "no-referrer"; } catch { } document.body.appendChild(audio);
-  const cache = new Map(); // paragraph index → audio URL list (prefetched)
-  let queue = [], qi = 0, blobUrls = [];
+  const cache = new Map(); // key → Promise<url[]>
+  let queue = [], qi = 0, blobUrls = [], aborters = [];
   const relBlobs = () => { blobUrls.forEach(u => { try { URL.revokeObjectURL(u); } catch { } }); blobUrls = []; };
-  // 0.1s of silence – played synchronously inside the user's tap so later play() calls (after async synthesis,
-  // on "ended", and after in-place chapter change) are allowed by mobile autoplay policies.
+  const abortAll = () => { aborters.forEach(a => { try { a.abort(); } catch { } }); aborters = []; };
   const SILENCE = (() => { const n = 800, b = new Uint8Array(44 + n), v = new DataView(b.buffer), w = (o, s) => [...s].forEach((ch, i) => b[o + i] = ch.charCodeAt(0)); w(0, "RIFF"); v.setUint32(4, 36 + n, true); w(8, "WAVEfmt "); v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true); v.setUint32(24, 8000, true); v.setUint32(28, 8000, true); v.setUint16(32, 1, true); v.setUint16(34, 8, true); w(36, "data"); v.setUint32(40, n, true); b.fill(128, 44); return URL.createObjectURL(new Blob([b], { type: "audio/wav" })); })();
   let unlocked = false;
   const unlock = () => { if (unlocked) return; audio.src = SILENCE; audio.play().then(() => { unlocked = true; }).catch(() => { }); };
 
+  /* ----- device voices ----- */
+  const devVoices = () => (synth ? synth.getVoices() : []).filter(v => /^(hi|en|mr|bn|ta|te|gu|kn|ml|pa|ur|ne)/i.test(v.lang)).sort((a, b) => (/^hi/i.test(b.lang) - /^hi/i.test(a.lang)) || a.lang.localeCompare(b.lang) || a.name.localeCompare(b.name));
   function pickVoice() {
     const vs = synth ? synth.getVoices() : [];
-    return vs.find(v => v.name === prefs.ttsVoice) || vs.find(v => /^en/i.test(v.lang) && /Google|Natural|Premium/i.test(v.name)) || vs.find(v => /^en/i.test(v.lang)) || vs[0];
+    return vs.find(v => v.name === prefs.ttsVoice) || vs.find(v => /^hi/i.test(v.lang)) || vs.find(v => /^en/i.test(v.lang) && /Google|Natural|Premium/i.test(v.name)) || vs.find(v => /^en/i.test(v.lang)) || vs[0];
   }
-  function fillVoices() {
-    const s = $("#ttsVoice"); if (!s) return;
-    let opts = "";
-    if (prefs.ttsEngine === "edge") { if (!TT.EDGE_VOICES.some(v => v[0] === prefs.edgeVoice)) prefs.edgeVoice = "en-US-AriaNeural"; opts = TT.EDGE_VOICES.map(v => `<option value="${v[0]}" ${v[0] === prefs.edgeVoice ? "selected" : ""}>${v[1]}</option>`).join(""); }
-    else if (prefs.ttsEngine === "google") { if (!TT.GOOGLE_LANGS.some(v => v[0] === prefs.gLang)) prefs.gLang = "en"; opts = TT.GOOGLE_LANGS.map(v => `<option value="${v[0]}" ${v[0] === prefs.gLang ? "selected" : ""}>${v[1]}</option>`).join(""); }
-    else { const vs = synth ? synth.getVoices().filter(v => /^(en|hi)/i.test(v.lang)) : []; opts = vs.map(v => `<option value="${esc(v.name)}" ${v.name === prefs.ttsVoice ? "selected" : ""}>${esc(v.name.replace(/^Microsoft |^Google /, ""))} (${esc(v.lang)})</option>`).join("") || "<option>Default</option>"; }
-    s.innerHTML = opts;
-    const eng = $("#ttsEngine"); if (eng) { eng.value = prefs.ttsEngine; if (!TT) eng.disabled = true; }
-  }
-  if (synth) synth.onvoiceschanged = () => { if (prefs.ttsEngine === "device") fillVoices(); };
-  fillVoices();
-
   const voiceArg = () => prefs.ttsEngine === "edge" ? prefs.edgeVoice : prefs.gLang;
-  const cacheKey = i => `${prefs.ttsEngine}|${voiceArg()}|${prefs.ttsEngine === "edge" ? prefs.ttsRate : 1}|${i}`;
+  function voiceLabel() {
+    if (prefs.ttsEngine === "edge") return TT.label(TT.EDGE_VOICES, prefs.edgeVoice);
+    if (prefs.ttsEngine === "google") return TT.label(TT.GOOGLE_LANGS, prefs.gLang);
+    const v = pickVoice(); return v ? v.name.replace(/^Microsoft |^Google /, "").split(" (")[0] : "Device";
+  }
+  function paintPlayer() {
+    $("#ttsVoiceName").textContent = `${ENGINE_NAME[prefs.ttsEngine]} · ${voiceLabel()}`;
+    $("#ttsRateVal").textContent = prefs.ttsRate + "x"; $("#tsRateVal").textContent = prefs.ttsRate + "x"; $("#tsRate").value = prefs.ttsRate;
+    ttsBar.classList.toggle("paused", paused);
+    $("#ttsPause").setAttribute("aria-label", paused ? "Play" : "Pause");
+  }
+
+  /* ----- voice sheet ----- */
+  function renderSheet() {
+    $$("#tsTabs button").forEach(b => { b.classList.toggle("active", b.dataset.eng === prefs.ttsEngine); if (!TT && b.dataset.eng !== "device") b.disabled = true; });
+    $("#tsNote").textContent = ENGINE_NOTE[prefs.ttsEngine];
+    const list = $("#tsList"); let html = "";
+    const item = (id, name, g, sel) => `<button class="ts-voice ${sel ? "active" : ""}" data-v="${esc(id)}"><span class="ts-av ${g === "♂" ? "m" : g === "♀" ? "f" : "n"}">${g || "🔊"}</span><span>${esc(name)}</span>${sel ? '<svg class="icon" viewBox="0 0 24 24"><path d="M9 16.2 4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4z"/></svg>' : ""}</button>`;
+    if (prefs.ttsEngine === "edge") html = TT.EDGE_VOICES.map(grp => `<div class="ts-grp">${esc(grp.group)}</div>` + grp.voices.map(v => item(v[0], v[1], v[2], v[0] === prefs.edgeVoice)).join("")).join("");
+    else if (prefs.ttsEngine === "google") html = TT.GOOGLE_LANGS.map(grp => `<div class="ts-grp">${esc(grp.group)}</div>` + grp.voices.map(v => item(v[0], v[1], v[2], v[0] === prefs.gLang)).join("")).join("");
+    else { const vs = devVoices(); const cur = pickVoice(); html = vs.length ? vs.map(v => item(v.name, `${v.name.replace(/^Microsoft |^Google /, "")} · ${v.lang}`, "", cur && v.name === cur.name)).join("") : `<p class="ts-empty">No voices found on this device. Try Neural or Google.</p>`; }
+    list.innerHTML = html;
+    $$("#tsSleep button").forEach(b => b.classList.toggle("active", String(sleepMode) === b.dataset.sleep));
+    paintPlayer();
+  }
+  const openSheet = o => { sheet.hidden = !o; document.body.classList.toggle("ts-open", o); if (o) renderSheet(); };
+  $("#ttsVoiceBtn").addEventListener("click", () => openSheet(true));
+  $("#ttsRateBtn").addEventListener("click", () => { prefs.ttsRate = prefs.ttsRate >= 2 ? 0.8 : +(prefs.ttsRate + 0.2).toFixed(1); applyRate(); });
+  $("#tsClose").addEventListener("click", () => openSheet(false));
+  sheet.addEventListener("click", e => { if (e.target === sheet) openSheet(false); });
+  $("#tsTabs").addEventListener("click", e => { const b = e.target.closest("button[data-eng]"); if (!b || b.disabled) return; prefs.ttsEngine = b.dataset.eng; savePrefs(); cache.clear(); abortAll(); renderSheet(); if (ttsOn) setTts(true, ttsIdx); });
+  $("#tsList").addEventListener("click", e => {
+    const b = e.target.closest("button[data-v]"); if (!b) return;
+    if (prefs.ttsEngine === "edge") prefs.edgeVoice = b.dataset.v; else if (prefs.ttsEngine === "google") prefs.gLang = b.dataset.v; else prefs.ttsVoice = b.dataset.v;
+    savePrefs(); cache.clear(); abortAll(); renderSheet(); if (ttsOn) setTts(true, ttsIdx); else toast("Voice: " + voiceLabel());
+  });
+  $("#tsRate").addEventListener("input", e => { prefs.ttsRate = +(+e.target.value).toFixed(1); paintPlayer(); });
+  $("#tsRate").addEventListener("change", () => applyRate());
+  function applyRate() {
+    prefs.ttsRate = Math.max(.5, Math.min(2, +prefs.ttsRate.toFixed(1))); savePrefs(); paintPlayer();
+    if (!ttsOn) return;
+    if (prefs.ttsEngine === "google") audio.playbackRate = prefs.ttsRate; else { cache.clear(); abortAll(); setTts(true, ttsIdx); }
+  }
+  if (synth) synth.onvoiceschanged = () => { if (prefs.ttsEngine === "device" && !sheet.hidden) renderSheet(); };
+
+  /* ----- sleep timer ----- */
+  let sleepMode = 0, sleepT = 0;
+  $("#tsSleep").addEventListener("click", e => {
+    const b = e.target.closest("button[data-sleep]"); if (!b) return;
+    clearTimeout(sleepT); sleepMode = b.dataset.sleep === "chapter" ? "chapter" : +b.dataset.sleep;
+    if (typeof sleepMode === "number" && sleepMode > 0) sleepT = setTimeout(() => { setTts(false); toast("Sleep timer – stopped listening"); }, sleepMode * 60000);
+    $$("#tsSleep button").forEach(x => x.classList.toggle("active", x === b));
+    toast(sleepMode === 0 ? "Sleep timer off" : sleepMode === "chapter" ? "Will stop at the end of this chapter" : `Will stop in ${sleepMode} min`);
+  });
+
+  /* ----- synthesis + playback ----- */
+  const cacheKey = i => `${prefs.ttsEngine}|${voiceArg()}|${prefs.ttsEngine === "edge" ? prefs.ttsRate : 1}|${c}|${i}`;
   async function getAudio(i) {
     const k = cacheKey(i); if (cache.has(k)) return cache.get(k);
-    const p = TT.synthesize(prefs.ttsEngine, pEls()[i].textContent, voiceArg(), prefs.ttsRate).then(urls => { if (prefs.ttsEngine === "edge") blobUrls.push(...urls); return urls; });
-    cache.set(k, p); p.catch(() => cache.delete(k));
+    const ac = typeof AbortController !== "undefined" ? new AbortController() : null; if (ac) aborters.push(ac);
+    const p = TT.synthesize(prefs.ttsEngine, pEls()[i].textContent, voiceArg(), prefs.ttsRate, ac && ac.signal).then(urls => { if (prefs.ttsEngine === "edge") blobUrls.push(...urls); return urls; });
+    cache.set(k, p); p.catch(() => cache.delete(k)).finally(() => { aborters = aborters.filter(a => a !== ac); });
     if (cache.size > 12) cache.delete(cache.keys().next().value);
     return p;
   }
   function highlight(i) {
     const els = pEls(); els.forEach(p => p.classList.remove("speaking"));
     if (els[i]) { els[i].classList.add("speaking"); if (document.visibilityState === "visible") els[i].scrollIntoView({ block: "center", behavior: "smooth" }); }
-    const s = $("#ttsStatus"); if (s) s.textContent = `${i + 1}/${els.length}`;
+    setStatus(`${i + 1} / ${els.length}`); $("#ttsTrack").style.width = (els.length ? ((i + 1) / els.length) * 100 : 0) + "%";
   }
+  const setStatus = t => { const s = $("#ttsStatus"); if (s) s.textContent = t; };
   function setMedia(state) {
     if (!("mediaSession" in navigator)) return;
     try {
@@ -257,15 +313,15 @@ document.addEventListener("app:ready", async () => {
   function playQueue(seq) {
     if (seq !== ttsSeq || qi >= queue.length) return;
     audio.src = queue[qi]; audio.playbackRate = prefs.ttsEngine === "google" ? prefs.ttsRate : 1;
-    const st = $("#ttsStatus"); if (st) st.textContent = `${ttsIdx + 1}/${pEls().length}`;
-    audio.play().catch(() => { if (seq === ttsSeq) { toast("Tap Resume to start listening"); togglePause(true); } });
+    audio.play().catch(() => { if (seq === ttsSeq) { toast("Tap ▶ to start listening"); togglePause(true); } });
   }
   audio.addEventListener("ended", () => { if (audio.src === SILENCE) return; qi++; if (qi < queue.length) playQueue(ttsSeq); else if (ttsOn) speak(ttsIdx + 1); });
-  audio.addEventListener("error", () => { if (!ttsOn || !audio.src || audio.src === SILENCE) return; toast("Audio failed – trying next paragraph"); qi++; if (qi < queue.length) playQueue(ttsSeq); else speak(ttsIdx + 1); });
+  audio.addEventListener("error", () => { if (!ttsOn || !audio.src || audio.src === SILENCE) return; qi++; if (qi < queue.length) playQueue(ttsSeq); else if (prefs.ttsEngine === "google" && synth) { toast("Google voice failed – using device voice"); prefs.ttsEngine = "device"; savePrefs(); speak(ttsIdx); } else speak(ttsIdx + 1); });
 
   async function nextChapter() {
+    if (sleepMode === "chapter") { setTts(false); toast("Chapter finished – sleep timer stopped listening"); return; }
     if (c >= n.chapters) { setTts(false); toast("You're all caught up"); return; }
-    const st = $("#ttsStatus"); if (st) st.textContent = "next…";
+    setStatus("next…");
     const seq = ttsSeq;
     try {
       cache.clear(); relBlobs();
@@ -275,48 +331,52 @@ document.addEventListener("app:ready", async () => {
       speak(0);
     } catch (e) { toast("Could not load next chapter"); setTts(false); }
   }
+  let edgeFails = 0;
   async function speak(i) {
     const els = pEls(); if (i >= els.length) { nextChapter(); return; }
-    ttsIdx = i; highlight(i); paused = false; $("#ttsPause").textContent = "Pause";
+    ttsIdx = i; highlight(i); paused = false; paintPlayer();
     const seq = ++ttsSeq;
     if (prefs.ttsEngine === "device") {
-      if (!synth) { toast("Device voice not supported here – switch to Edge/Google"); return; }
+      if (!synth) { toast("Device voice not supported here – switch to Neural/Google"); openSheet(true); return; }
       synth.cancel();
       utter = new SpeechSynthesisUtterance(els[i].textContent);
-      utter.rate = prefs.ttsRate; const v = pickVoice(); if (v) utter.voice = v;
+      utter.rate = prefs.ttsRate; const v = pickVoice(); if (v) { utter.voice = v; utter.lang = v.lang; }
       utter.onend = () => { if (ttsOn && seq === ttsSeq) speak(i + 1); };
       utter.onerror = e => { if (e.error !== "interrupted" && e.error !== "canceled") setTts(false); };
-      synth.speak(utter); return;
+      synth.speak(utter); setMedia("playing"); return;
     }
-    const st = $("#ttsStatus"); if (st) st.textContent = "…";
+    ttsBar.classList.add("loading");
     try {
       queue = await getAudio(i); qi = 0;
       if (seq !== ttsSeq || !ttsOn) return;
+      ttsBar.classList.remove("loading"); edgeFails = 0;
       playQueue(seq); setMedia("playing");
-      // prefetch next 2 paragraphs so playback never stalls
-      for (let k = 1; k <= 2; k++) if (i + k < els.length) getAudio(i + k).catch(() => { });
+      for (let k = 1; k <= 2; k++) if (i + k < els.length) getAudio(i + k).catch(() => { }); // prefetch so playback never stalls
     } catch (e) {
       if (seq !== ttsSeq) return;
+      ttsBar.classList.remove("loading");
+      if (e.name === "AbortError") return;
       console.warn("TTS", e);
-      if (prefs.ttsEngine === "edge") { toast("Edge voice unavailable – switched to Google voice"); prefs.ttsEngine = "google"; savePrefs(); fillVoices(); speak(i); }
-      else if (synth) { toast("Online voice failed – using device voice"); prefs.ttsEngine = "device"; savePrefs(); fillVoices(); speak(i); }
+      if (prefs.ttsEngine === "edge" && ++edgeFails < 3) { toast("Voice server hiccup – retrying…"); setTimeout(() => { if (ttsOn && seq === ttsSeq) speak(i); }, 1200 * edgeFails); return; }
+      if (prefs.ttsEngine === "edge") { toast("Neural voice unavailable right now – switched to Google"); prefs.ttsEngine = "google"; prefs.gLang = /^hi/.test(prefs.edgeVoice) ? "hi" : "en-IN"; savePrefs(); paintPlayer(); edgeFails = 0; speak(i); }
+      else if (synth) { toast("Online voice failed – using device voice"); prefs.ttsEngine = "device"; savePrefs(); paintPlayer(); speak(i); }
       else { toast("Text-to-speech failed: " + e.message); setTts(false); }
     }
   }
   function togglePause(p) {
     if (!ttsOn) return;
-    paused = p; $("#ttsPause").textContent = p ? "Resume" : "Pause";
+    paused = p; paintPlayer();
     if (prefs.ttsEngine === "device") { p ? synth.pause() : synth.resume(); }
     else { p ? audio.pause() : audio.play().catch(() => { }); }
     if ("mediaSession" in navigator) navigator.mediaSession.playbackState = p ? "paused" : "playing";
   }
   function setTts(on, from) {
-    ttsOn = on; ttsBtn.classList.toggle("active", on); ttsBar.hidden = !on;
-    ttsSeq++; if (synth) synth.cancel();
+    ttsOn = on; ttsBtn.classList.toggle("active", on); ttsBar.hidden = !on; document.body.classList.toggle("tts-on", on);
+    ttsSeq++; if (synth) synth.cancel(); abortAll();
     audio.pause();
     if (on && prefs.ttsEngine !== "device") unlock(); else { audio.removeAttribute("src"); audio.load(); }
-    if (on) { $("#ttsRateVal").textContent = prefs.ttsRate + "x"; speak(from ?? ttsIdx); }
-    else { pEls().forEach(p => p.classList.remove("speaking")); relBlobs(); cache.clear(); if ("mediaSession" in navigator) navigator.mediaSession.playbackState = "none"; }
+    if (on) { paintPlayer(); speak(from ?? ttsIdx); }
+    else { openSheet(false); clearTimeout(sleepT); sleepMode = 0; pEls().forEach(p => p.classList.remove("speaking")); relBlobs(); cache.clear(); ttsBar.classList.remove("loading"); if ("mediaSession" in navigator) navigator.mediaSession.playbackState = "none"; }
   }
   ttsBtn.addEventListener("click", () => setTts(!ttsOn));
   ttsBar.addEventListener("click", e => {
@@ -325,12 +385,6 @@ document.addEventListener("app:ready", async () => {
     if (b.id === "ttsNext") setTts(true, ttsIdx + 1);
     if (b.id === "ttsStop") setTts(false);
     if (b.id === "ttsPause") togglePause(!paused);
-    if (b.dataset.rate) { prefs.ttsRate = Math.max(.5, Math.min(2, +(prefs.ttsRate + +b.dataset.rate).toFixed(1))); savePrefs(); $("#ttsRateVal").textContent = prefs.ttsRate + "x"; if (prefs.ttsEngine === "google") audio.playbackRate = prefs.ttsRate; else setTts(true, ttsIdx); }
-  });
-  $("#ttsEngine")?.addEventListener("change", e => { prefs.ttsEngine = e.target.value; savePrefs(); cache.clear(); fillVoices(); if (ttsOn) setTts(true, ttsIdx); });
-  $("#ttsVoice")?.addEventListener("change", e => {
-    if (prefs.ttsEngine === "edge") prefs.edgeVoice = e.target.value; else if (prefs.ttsEngine === "google") prefs.gLang = e.target.value; else prefs.ttsVoice = e.target.value;
-    savePrefs(); cache.clear(); if (ttsOn) setTts(true, ttsIdx);
   });
   // click a paragraph while TTS is on → start reading from there
   content.addEventListener("click", e => {
@@ -338,12 +392,14 @@ document.addEventListener("app:ready", async () => {
     if (ttsOn && p) { setTts(true, +p.dataset.i); return; }
     if (document.body.classList.contains("focus-mode") && !e.target.closest("a,button")) setFocus(false);
   });
+  paintPlayer();
   addEventListener("beforeunload", () => { synth && synth.cancel(); relBlobs(); });
 
   /* ---------- keyboard + swipe navigation ---------- */
   document.addEventListener("keydown", e => {
     if (e.target.tagName === "TEXTAREA" || e.target.tagName === "INPUT" || e.target.tagName === "SELECT" || e.ctrlKey || e.metaKey || e.altKey) return;
-    if (e.key === "Escape") { if (!panel.hidden) setOpen(false); else if (document.body.classList.contains("focus-mode")) setFocus(false); }
+    if (e.key === "Escape") { if (!sheet.hidden) openSheet(false); else if (!panel.hidden) setOpen(false); else if (document.body.classList.contains("focus-mode")) setFocus(false); }
+    if (e.key === " " && ttsOn) { e.preventDefault(); togglePause(!paused); }
     if (e.key === "ArrowLeft" && c > 1) location.href = link(c - 1);
     if (e.key === "ArrowRight" && c < n.chapters) location.href = link(c + 1);
     const k = e.key.toLowerCase();

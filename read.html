@@ -6,7 +6,7 @@
   <title>Read - Novelxplin</title>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Sora:wght@600;700&family=Merriweather:wght@400;700&family=Lora:wght@400;700&display=swap" rel="stylesheet">
   <link rel="icon" type="image/svg+xml" href="/img/favicon.svg">
-  <link rel="stylesheet" href="/css/style.css?v=20261013c">
+  <link rel="stylesheet" href="/css/style.css?v=20261013f">
 </head>
 <body class="reader-page">
   <div class="read-progress" id="readProgress" aria-hidden="true"></div>
@@ -42,15 +42,52 @@
   <div class="float-bar" id="autoBar" hidden>
     <span>Auto-scroll</span><button data-as="-1">&minus;</button><b id="asVal">2</b><button data-as="1">+</button><button id="asStop" class="stop">Stop</button>
   </div>
-  <div class="float-bar tts" id="ttsBar" hidden>
-    <span>Listening <em id="ttsStatus"></em></span>
-    <button id="ttsPrev" title="Previous paragraph">&#9664;</button><button id="ttsPause">Pause</button><button id="ttsNext" title="Next paragraph">&#9654;</button>
-    <button data-rate="-0.1">&minus;</button><b id="ttsRateVal">1x</b><button data-rate="0.1">+</button>
-    <select id="ttsEngine" aria-label="Voice engine" title="Voice engine – all run on your device, nothing goes through our server">
-      <option value="edge">Edge neural</option><option value="google">Google</option><option value="device">Device</option>
-    </select>
-    <select id="ttsVoice" aria-label="Voice"></select>
-    <button id="ttsStop" class="stop">Stop</button>
+  <!-- Listen player -->
+  <div class="tts-player" id="ttsBar" role="region" aria-label="Listen player" hidden>
+    <div class="tp-head">
+      <span class="tp-live"><i></i>Listening</span>
+      <span class="tp-pos" id="ttsStatus">–</span>
+      <button class="tp-x" id="ttsStop" title="Stop listening" aria-label="Stop">&times;</button>
+    </div>
+    <div class="tp-track" aria-hidden="true"><i id="ttsTrack"></i></div>
+    <div class="tp-main">
+      <button class="tp-chip" id="ttsVoiceBtn" title="Change voice">
+        <svg class="icon" viewBox="0 0 24 24"><path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11z"/></svg>
+        <span id="ttsVoiceName">Voice</span>
+      </button>
+      <div class="tp-ctl">
+        <button id="ttsPrev" title="Previous paragraph" aria-label="Previous paragraph"><svg class="icon" viewBox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6 8.5 6V6z"/></svg></button>
+        <button id="ttsPause" class="tp-play" aria-label="Pause"><svg class="icon i-pause" viewBox="0 0 24 24"><path d="M6 5h4v14H6zm8 0h4v14h-4z"/></svg><svg class="icon i-play" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></button>
+        <button id="ttsNext" title="Next paragraph" aria-label="Next paragraph"><svg class="icon" viewBox="0 0 24 24"><path d="M16 6h2v12h-2zM6 18l8.5-6L6 6z"/></svg></button>
+      </div>
+      <button class="tp-chip" id="ttsRateBtn" title="Playback speed"><b id="ttsRateVal">1x</b></button>
+    </div>
+  </div>
+
+  <!-- Voice picker sheet -->
+  <div class="tts-sheet" id="ttsSheet" hidden>
+    <div class="ts-card" role="dialog" aria-label="Voice settings">
+      <div class="ts-grab"></div>
+      <div class="ts-head"><strong>Voice &amp; speed</strong><button class="ts-close" id="tsClose" aria-label="Close">&times;</button></div>
+      <div class="ts-tabs" id="tsTabs">
+        <button data-eng="edge">Neural <small>best</small></button>
+        <button data-eng="google">Google</button>
+        <button data-eng="device">Device</button>
+      </div>
+      <p class="ts-note" id="tsNote"></p>
+      <div class="ts-list" id="tsList"></div>
+      <div class="ts-row">
+        <label>Speed</label>
+        <input type="range" id="tsRate" min="0.5" max="2" step="0.1" aria-label="Speed">
+        <b id="tsRateVal">1x</b>
+      </div>
+      <div class="ts-row">
+        <label>Sleep timer</label>
+        <div class="ts-chips" id="tsSleep">
+          <button data-sleep="0">Off</button><button data-sleep="15">15m</button><button data-sleep="30">30m</button><button data-sleep="60">60m</button><button data-sleep="chapter">Chapter end</button>
+        </div>
+      </div>
+    </div>
   </div>
 
   <main class="reader-wrap">
@@ -76,7 +113,7 @@
   <script src="/js/config.js?v=20261013c"></script>
   <script src="/js/data.js?v=20261013c"></script>
   <script src="/js/app.js?v=20261013c"></script>
-  <script src="/js/tts.js?v=20261013e"></script>
-  <script src="/js/reader.js?v=20261013e"></script>
+  <script src="/js/tts.js?v=20261013f"></script>
+  <script src="/js/reader.js?v=20261013f"></script>
 </body>
 </html>
