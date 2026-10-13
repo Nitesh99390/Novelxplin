@@ -46,6 +46,19 @@ try {
 if (!ADMIN_EMAILS.length) ADMIN_EMAILS = ["bhuimharniteshbhuimhar@gmail.com"];
 if (!FIREBASE_PROJECT) console.warn("[auth] FIREBASE_PROJECT_ID not set – ID-token audience is only self-consistency checked. Set it (or projectId in src/js/config.js).");
 
+// ADMIN_DEV_TOKEN is a LOCAL-ONLY bypass for Firebase auth. It is hard-disabled whenever
+// NODE_ENV=production (or when the token is trivially short) so it can never be used – or
+// leaked via the admin page's ?dev= param – against the live server.
+const IS_PROD = /^prod(uction)?$/i.test(process.env.NODE_ENV || "");
+const DEV_TOKEN = (() => {
+  const t = String(process.env.ADMIN_DEV_TOKEN || "");
+  if (!t) return "";
+  if (IS_PROD) { console.warn("[auth] ADMIN_DEV_TOKEN is set but NODE_ENV=production – dev bypass DISABLED."); return ""; }
+  console.warn("[auth] ADMIN_DEV_TOKEN dev bypass is ACTIVE (never run production this way).");
+  return t;
+})();
+const isDevToken = tok => !!DEV_TOKEN && tok.length === DEV_TOKEN.length && crypto.timingSafeEqual(Buffer.from(tok), Buffer.from(DEV_TOKEN));
+
 for (const d of [DATA, CHAP, UPLOADS]) fs.mkdirSync(d, { recursive: true });
 if (!fs.existsSync(CATALOG)) fs.writeFileSync(CATALOG, "[]");
 if (!fs.existsSync(ADMINS_FILE)) fs.writeFileSync(ADMINS_FILE, "[]");
@@ -98,7 +111,7 @@ let ratings = {};
 try { ratings = JSON.parse(fs.readFileSync(RATINGS_FILE, "utf8")); if (!ratings || typeof ratings !== "object" || Array.isArray(ratings)) ratings = {}; } catch { ratings = {}; }
 const ratingsStore = persister(RATINGS_FILE, () => ratings, "ratings");
 const saveRatings = () => ratingsStore.schedule();
-for (const sig of ["SIGTERM", "SIGINT"]) process.on(sig, () => { catalogStore.flushSync(); ratingsStore.flushSync(); process.exit(0); });
+for (const sig of ["SIGTERM", "SIGINT"]) process.on(sig, () => { catalogStore.flushSync(); ratingsStore.flushSync(); try { quotaStore.flushSync(); } catch { } process.exit(0); });
 process.on("unhandledRejection", e => console.error("[unhandledRejection]", e && e.message || e));
 function ratingSummary(slug) {
   const votes = Object.values(ratings[slug] || {});
@@ -193,8 +206,8 @@ async function requireAdmin(req) {
   const auth = req.headers.authorization || "";
   const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
   if (!token) throw Object.assign(new Error("Login required"), { status: 401 });
-  // Dev bypass: ADMIN_DEV_TOKEN env lets you test without Firebase
-  if (process.env.ADMIN_DEV_TOKEN && token === process.env.ADMIN_DEV_TOKEN) return { email: OWNERS[0], dev: true, owner: true };
+  // Dev bypass: ADMIN_DEV_TOKEN env lets you test without Firebase (never in production)
+  if (isDevToken(token)) return { email: OWNERS[0], dev: true, owner: true };
   let p; try { p = await verifyIdToken(token); } catch (e) { throw Object.assign(new Error("Invalid token: " + e.message), { status: 401 }); }
   if (!isAdmin(p.email)) throw Object.assign(new Error("Not an admin"), { status: 403 });
   p.owner = isOwner(p.email);
@@ -205,7 +218,7 @@ async function requireUser(req) {
   const auth = req.headers.authorization || "";
   const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
   if (!token) throw Object.assign(new Error("Login required"), { status: 401 });
-  if (process.env.ADMIN_DEV_TOKEN && token === process.env.ADMIN_DEV_TOKEN) return { uid: "dev-user", email: OWNERS[0], name: "Dev", dev: true };
+  if (isDevToken(token)) return { uid: "dev-user", email: OWNERS[0], name: "Dev", dev: true };
   let p; try { p = await verifyIdToken(token); } catch (e) { throw Object.assign(new Error("Invalid token: " + e.message), { status: 401 }); }
   const uid = String(p.sub || p.user_id || "").replace(/[^A-Za-z0-9_-]/g, "").slice(0, 128);
   if (!uid) throw Object.assign(new Error("Invalid token: no uid"), { status: 401 });
@@ -282,6 +295,83 @@ function guardChapter(req) {
   if (!r.ok) return { code: r.code, body: { error: r.msg }, headers: { "Retry-After": String(r.retry) } };
   if (!checkToken(req)) return { code: 403, body: { error: "Session expired - reload the page", code: "token" } };
   return null;
+}
+
+/* ---------- login-gated chapters + per-account quota + watermark ----------
+   Catalog / search / novel pages stay public (SEO) but the chapter TEXT itself requires a
+   verified Google sign-in (Firebase ID token). On top of the IP/UA guards above:
+     * CHAPTER_QUOTA_DAY distinct chapters per rolling CHAPTER_QUOTA_WINDOW_H hours per uid
+       (default 50 / 24 h). Counted per DISTINCT (slug, num) so re-opening / refreshing / TTS
+       warm-up / retries of the same chapter never burn quota twice.
+     * Prefetches (X-NX-Prefetch: 1) are only served when the chapter is already in the user's
+       window or the quota has head-room, and they do NOT count: the chapter is only charged when
+       the reader actually opens it (the real request without the prefetch header).
+     * Every served chapter is watermarked with a pseudonymous id = HMAC(uid, secret) – stable per
+       account, not reversible, but matchable against our own records if a dump leaks. */
+const QUOTA_DAY = Math.max(1, +process.env.CHAPTER_QUOTA_DAY || 50);
+const QUOTA_WINDOW = Math.max(1, +process.env.CHAPTER_QUOTA_WINDOW_H || 24) * 3600000;
+const QUOTA_FILE = path.join(DATA, "quota.json");
+let quota = {}; // uid -> { [slug/num]: ms }
+try { quota = JSON.parse(fs.readFileSync(QUOTA_FILE, "utf8")); if (!quota || typeof quota !== "object") quota = {}; } catch { quota = {}; }
+const quotaStore = persister(QUOTA_FILE, () => quota, "quota");
+function quotaPrune(uid) {
+  const e = quota[uid]; if (!e) return {};
+  const cut = Date.now() - QUOTA_WINDOW; let ch = false;
+  for (const k in e) if (e[k] < cut) { delete e[k]; ch = true; }
+  if (!Object.keys(e).length) { delete quota[uid]; if (ch) quotaStore.schedule(); return {}; }
+  if (ch) quotaStore.schedule();
+  return e;
+}
+// returns { ok, used, limit, retry } ; charge=false only checks
+function accountQuota(uid, slug, num, charge) {
+  const e = quotaPrune(uid), key = slug + "/" + num, used = Object.keys(e).length;
+  if (e[key]) return { ok: true, used, limit: QUOTA_DAY, seen: true };
+  if (used >= QUOTA_DAY) {
+    const oldest = Math.min(...Object.values(e));
+    return { ok: false, used, limit: QUOTA_DAY, retry: Math.max(60, Math.ceil((oldest + QUOTA_WINDOW - Date.now()) / 1000)) };
+  }
+  if (charge) { (quota[uid] = quota[uid] || e)[key] = Date.now(); quotaStore.schedule(); }
+  return { ok: true, used: used + (charge ? 1 : 0), limit: QUOTA_DAY };
+}
+setInterval(() => { for (const uid of Object.keys(quota)) quotaPrune(uid); }, 30 * 60 * 1000).unref();
+
+// Pseudonymous watermark id: HMAC-SHA256(uid, WM_SECRET) -> 16 base32-ish chars. Same account
+// always gets the same id; nobody can get the uid back out of it without the server secret.
+const WM_SECRET = process.env.WM_SECRET || process.env.NX_SECRET || NX_SECRET;
+const WM_ALPHA = "abcdefghjkmnpqrstuvwxyz23456789";
+function watermarkId(uid) {
+  const h = crypto.createHmac("sha256", WM_SECRET).update("wm|" + uid).digest();
+  let s = ""; for (let i = 0; i < 16; i++) s += WM_ALPHA[h[i] % WM_ALPHA.length];
+  return s;
+}
+// id -> zero-width string: each 5-bit symbol becomes a run of 3 zero-width chars (base-4 digits
+// over ZWSP/ZWNJ/ZWJ/WJ) framed by U+2060..U+FEFF so it survives copy/paste and most scrapers.
+const ZW = ["\u200B", "\u200C", "\u200D", "\u2060"];
+function zwEncode(id) {
+  let out = "\uFEFF";
+  for (const ch of id) { let v = WM_ALPHA.indexOf(ch); if (v < 0) v = 0; out += ZW[(v >> 4) & 3] + ZW[(v >> 2) & 3] + ZW[v & 3]; }
+  return out + "\uFEFF";
+}
+// exported for the admin / forensics: strip a leaked paragraph down to its id
+function zwDecode(text) {
+  const m = /\uFEFF([\u200B\u200C\u200D\u2060]{48})\uFEFF/.exec(String(text || "")); if (!m) return "";
+  let s = ""; for (let i = 0; i < 48; i += 3) { const d = c => ZW.indexOf(c); s += WM_ALPHA[(d(m[1][i]) << 4) | (d(m[1][i + 1]) << 2) | d(m[1][i + 2])]; }
+  return s;
+}
+// Inject the watermark: a zero-width copy appended to a few paragraphs chosen from the id
+// itself (so two accounts' dumps differ in different places), plus explicit metadata.
+function watermarkChapter(raw, wm) {
+  let ch; try { ch = JSON.parse(raw); } catch { return raw; }
+  const body = Array.isArray(ch.body) ? ch.body.map(String) : splitParas(ch.body);
+  const z = zwEncode(wm), n = body.length;
+  if (n) {
+    const seed = crypto.createHash("sha256").update(wm + "|" + n).digest();
+    const picks = new Set([0, n - 1]); for (let i = 0; i < 6 && n > 2; i++) picks.add(1 + (seed[i] % (n - 2)));
+    const step = Math.max(3, Math.floor(n / 6)); for (let i = (seed[7] % step); i < n; i += step) picks.add(i);
+    for (const i of picks) { const p = body[i]; const cut = p.length > 40 ? p.indexOf(" ", Math.floor(p.length / 2)) : -1; body[i] = cut > 0 ? p.slice(0, cut) + z + p.slice(cut) : p + z; }
+  }
+  ch.body = body; ch.wm = wm;
+  return JSON.stringify(ch);
 }
 function corsHeaders(req) {
   const o = req.headers.origin; if (!o) return {};
@@ -677,6 +767,13 @@ async function handle(req, res) {
     const seg = p.split("/").filter(Boolean); // api, novels, slug, chapters, num
     if (seg[1] === "health") return send(res, 200, { ok: true, novels: catalog.length, uptime: process.uptime(), mem: process.memoryUsage().rss });
     if (seg[1] === "me") { try { const u = await requireAdmin(req); return send(res, 200, { email: u.email, admin: true, owner: !!u.owner }); } catch (e) { return send(res, e.status || 401, { admin: false, owner: false, error: e.message }); } }
+    // Owner-only forensics: POST {text} -> { wm } decodes a leaked paragraph's zero-width mark;
+    // POST {uid} -> { wm } gives the id a given account would produce (to match against a leak).
+    if (seg[1] === "watermark" && req.method === "POST") {
+      await requireOwner(req); const b = await readJSON(req, 2 * 1024 * 1024);
+      if (b.uid) return send(res, 200, { wm: watermarkId(String(b.uid).replace(/[^A-Za-z0-9_-]/g, "").slice(0, 128)) });
+      return send(res, 200, { wm: zwDecode(b.text) || null });
+    }
 
     // ---- admin management (owner only) ----
     if (seg[1] === "admins") {
@@ -766,7 +863,17 @@ async function handle(req, res) {
         const cn = safeNum(num); if (!cn) return send(res, 400, { error: "Bad chapter number" });
         if (req.method === "GET") {
           const g = guardChapter(req); if (g) return send(res, g.code, g.body, g.headers);
-          try { const raw = await fsp.readFile(chapFile(slug, cn)); return send(res, 200, raw, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "private, max-age=300", "Vary": "X-NX-Token" }); }
+          // login gate: a verified Google account is required to read chapter text
+          let u; try { u = await requireUser(req); } catch (e) { return send(res, 401, { error: "Sign in with Google to read chapters", code: "login" }, { "WWW-Authenticate": "Bearer realm=\"novelxplin\"", "Cache-Control": "no-store" }); }
+          const prefetch = /^(1|true)$/i.test(String(req.headers["x-nx-prefetch"] || ""));
+          const qr = accountQuota(u.uid, slug, cn, !prefetch);
+          if (!qr.ok) {
+            if (prefetch) return send(res, 429, { error: "Prefetch skipped - daily quota reached", code: "quota", used: qr.used, limit: qr.limit }, { "Retry-After": String(qr.retry), "Cache-Control": "no-store" });
+            console.warn(`[quota] ${u.uid.slice(0, 8)}… (${u.email}) hit ${qr.limit} chapters / ${QUOTA_WINDOW / 3600000}h`);
+            return send(res, 429, { error: `Daily reading limit reached (${qr.limit} chapters per ${QUOTA_WINDOW / 3600000} hours). Please come back later.`, code: "quota", used: qr.used, limit: qr.limit, retry: qr.retry }, { "Retry-After": String(qr.retry), "Cache-Control": "no-store" });
+          }
+          const wm = watermarkId(u.uid);
+          try { const raw = await fsp.readFile(chapFile(slug, cn), "utf8"); return send(res, 200, watermarkChapter(raw, wm), { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "private, no-store", "Vary": "Authorization, X-NX-Token", "X-NX-Quota": `${qr.used}/${qr.limit}`, "X-NX-WM": wm }); }
           catch { return send(res, 404, { error: "Chapter not found" }); }
         }
         if (req.method === "PUT") {

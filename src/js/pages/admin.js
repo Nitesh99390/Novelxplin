@@ -9,7 +9,11 @@ document.addEventListener("app:ready", async () => {
   $("#crumb").innerHTML = breadcrumb([{ label: "Home", href: U.home }, { label: "Admin" }]);
   const gate = $("#gate");
   const user = Auth.user();
-  const devToken = new URLSearchParams(location.search).get("dev");
+  // ?dev=<ADMIN_DEV_TOKEN> is a LOCAL dev bypass only. Ignore it on any non-local host so the
+  // token can never be pasted into (or leak via) a production URL / referrer / history.
+  const isLocal = /^(localhost|127\.0\.0\.1|\[::1\]|0\.0\.0\.0)$/.test(location.hostname) || /\.(local|lan|internal)$/.test(location.hostname);
+  let devToken = new URLSearchParams(location.search).get("dev");
+  if (devToken && !isLocal) { devToken = null; try { history.replaceState(null, "", location.pathname); } catch { } }
   if (!devToken && (!user || !Auth.isAdmin())) {
     gate.style.display = ""; gate.innerHTML = `<div class="empty">${I.user}<div>${user ? `Signed in as <b>${esc(user.email)}</b> – this account is not an admin.<br><small style="color:var(--muted)">Ask the site owner to add this email in Admin → Admins, then sign in again.</small>` : "Admin area. Please sign in with an admin Google account."}<br><br>${user ? `<a href="#" id="gOut" style="color:var(--link)">Sign out</a>` : `<button class="btn" id="gIn">${I.user} Sign in</button>`}</div></div>`;
     $("#gIn")?.addEventListener("click", openLogin); $("#gOut")?.addEventListener("click", async e => { e.preventDefault(); await Auth.logout(); location.reload(); });

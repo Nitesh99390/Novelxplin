@@ -33,16 +33,26 @@
     try { const h = await (await fetch(location.pathname, { cache: "no-store", credentials: "same-origin" })).text(); const m = /name="nx-t"\s+content="([^"]+)"/.exec(h); if (m) nxToken = m[1]; } catch { }
     return nxToken;
   }
+  // Chapter text is login-gated on the server: attach the Firebase ID token when we have one.
+  async function authHeader() {
+    try {
+      if (window.Auth && Auth.ready) await Promise.race([Auth.ready, new Promise(r => setTimeout(r, 4000))]);
+      const tok = window.Auth && Auth.token ? await Auth.token() : null;
+      return tok ? { Authorization: "Bearer " + tok } : {};
+    } catch { return {}; }
+  }
   async function api(path, opts, retry) {
     opts = opts || {};
     opts.headers = Object.assign({}, opts.headers || {}, nxToken ? { "X-NX-Token": nxToken } : {});
     opts.credentials = opts.credentials || "same-origin";
     const r = await fetch(API + path, opts);
     if (!r.ok) {
-      let m = r.statusText, code = ""; try { const j = await r.json(); m = j.error || m; code = j.code || ""; } catch { }
+      let m = r.statusText, code = "", extra = {}; try { const j = await r.json(); m = j.error || m; code = j.code || ""; extra = j; } catch { }
       if (r.status === 403 && code === "token" && !retry && await refreshToken()) return api(path, opts, true);
-      if (r.status === 429) m = "Too many requests – please wait a moment";
-      throw new Error(m);
+      if (r.status === 429 && code !== "quota") m = "Too many requests – please wait a moment";
+      const err = new Error(m); err.status = r.status; err.code = code || (r.status === 401 ? "login" : "");
+      err.used = extra.used; err.limit = extra.limit; err.retry = extra.retry || +r.headers.get("Retry-After") || 0;
+      throw err;
     }
     return r.json();
   }
@@ -107,8 +117,14 @@
     get(slug) { return bySlug[slug] || null; },
     // async: full chapter index [{num,title,date}]
     chapters(slug) { return api(`/api/novels/${encodeURIComponent(slug)}/chapters`); },
-    // async: {num,title,date,body:[...]}
-    chapter(slug, num) { return api(`/api/novels/${encodeURIComponent(slug)}/chapters/${num}`); },
+    // async: {num,title,date,body:[...],wm}. Requires sign-in (401 code="login"), counts against the
+    // account's daily quota (429 code="quota"). opts.prefetch=true marks a speculative load: the
+    // server serves it without charging quota (the charge happens when the chapter is really opened).
+    async chapter(slug, num, opts) {
+      const h = await authHeader(); if (opts && opts.prefetch) h["X-NX-Prefetch"] = "1";
+      return api(`/api/novels/${encodeURIComponent(slug)}/chapters/${num}`, { headers: h, cache: "no-store" });
+    },
+    authHeader,
     featured() { return [...novels].sort((a, b) => b.views - a.views).slice(0, 7); },
     latestRelease(limit) { return [...novels].filter(n => n.chapters > 0).sort((a, b) => a.updatedMinutesAgo - b.updatedMinutesAgo).slice(0, limit || novels.length); },
     latestNovels(limit) { return [...novels].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)).slice(0, limit || novels.length); },

@@ -60,14 +60,48 @@ document.addEventListener("app:ready", async () => {
   $("#content").innerHTML = SK.html("reader", 4);
   let paras = [];
   const content = $("#content");
+  // Chapter text is login-gated (401) and quota-limited per account (429). Render friendly
+  // prompts instead of a bare error so the reader knows exactly what to do next.
+  function renderGate(e) {
+    SK.clear();
+    if (e && e.code === "login") {
+      content.innerHTML = `<div class="empty gate gate-login">${I.shelf || I.heart}
+        <h2 style="margin:10px 0 4px">Sign in to keep reading</h2>
+        <div style="color:var(--muted);max-width:420px;margin:0 auto 14px">Chapters on Novelxplin are free, but reading requires a Google account. This keeps the site fair for everyone and protects our translators' work from bots.</div>
+        <button class="g-btn" id="gateLogin" type="button" style="max-width:300px;margin:0 auto"><svg width="18" height="18" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9 3.5l6.7-6.7C35.7 2.6 30.2 0 24 0 14.6 0 6.5 5.4 2.6 13.2l7.8 6C12.3 13.6 17.7 9.5 24 9.5z"/><path fill="#4285F4" d="M46.5 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.7c-.6 3-2.3 5.5-4.8 7.2l7.5 5.8c4.4-4 7.1-10 7.1-17.5z"/><path fill="#FBBC05" d="M10.4 28.8A14.6 14.6 0 0 1 9.5 24c0-1.7.3-3.3.9-4.8l-7.8-6A24 24 0 0 0 0 24c0 3.9.9 7.5 2.6 10.8l7.8-6z"/><path fill="#34A853" d="M24 48c6.2 0 11.7-2 15.5-5.6l-7.5-5.8c-2.1 1.4-4.8 2.3-8 2.3-6.3 0-11.7-4.1-13.6-9.9l-7.8 6C6.5 42.6 14.6 48 24 48z"/></svg> Sign in with Google</button>
+        <p style="margin-top:12px"><a href="${U.novel(n.slug)}">Back to ${esc(n.title)}</a></p></div>`;
+      $("#gateLogin")?.addEventListener("click", async () => {
+        if (!window.Auth || !Auth.enabled) { toast("Sign-in is not configured"); return; }
+        try { await Auth.login(); toast("Signed in – loading chapter…"); setTimeout(() => location.reload(), 300); } catch { }
+      });
+      // signed in from the header modal instead? just reload into the chapter
+      document.addEventListener("auth:change", ev => { if (ev.detail) location.reload(); }, { once: true });
+      return;
+    }
+    if (e && e.code === "quota") {
+      const h = e.retry ? Math.max(1, Math.ceil(e.retry / 3600)) : 0;
+      content.innerHTML = `<div class="empty gate gate-quota">${I.clock}
+        <h2 style="margin:10px 0 4px">Daily reading limit reached</h2>
+        <div style="color:var(--muted);max-width:440px;margin:0 auto 14px">${esc(e.message)}${e.limit ? `<br><small>${e.used || e.limit} / ${e.limit} chapters used${h ? ` · resets in about ${h} hour${h > 1 ? "s" : ""}` : ""}</small>` : ""}</div>
+        <p><a class="btn ghost" href="${U.novel(n.slug)}">${I.list} Back to chapter list</a> <a class="btn ghost" href="${typeof U.library === "function" ? U.library() : U.library}">${I.heart} My library</a></p></div>`;
+      return;
+    }
+    content.innerHTML = `<div class="empty">${I.search}<div>Failed to load chapter: ${esc(e && e.message || "unknown error")}</div></div>`;
+  }
   function renderChapter(ch) {
     const body = Array.isArray(ch.body) ? ch.body : String(ch.body || "").split(/\n{2,}|\n/).filter(Boolean);
     paras = body;
     const words = body.join(" ").split(/\s+/).filter(Boolean).length;
     const mins = Math.max(1, Math.round(words / 230));
+    // pseudonymous watermark (server-issued, per account): keep it in DOM metadata too so a
+    // screenshot / saved page / scraped HTML is traceable, not only the zero-width text marks
+    const wm = String(ch.wm || "").replace(/[^a-z0-9]/gi, "").slice(0, 32);
+    content.dataset.wm = wm; document.documentElement.dataset.rid = wm;
+    let meta = document.querySelector('meta[name="nx-wm"]'); if (!meta) { meta = document.createElement("meta"); meta.name = "nx-wm"; document.head.appendChild(meta); } meta.content = wm;
     content.innerHTML = `<h1>${esc(ch.title || title)}</h1>
       <div class="sub">${esc(n.title)} &middot; ${esc((ch.date || "").slice(0, 10))} &middot; ${words.toLocaleString()} words &middot; ${I.clock} ${mins} min read</div>`
-      + body.map((p, i) => `<p data-i="${i}">${esc(p)}</p>`).join("")
+      + body.map((p, i) => `<p data-i="${i}"${wm && i % 7 === 3 ? ` data-r="${wm.slice(i % 9, i % 9 + 6)}"` : ""}>${esc(p)}</p>`).join("")
+      + (wm ? `<span class="wm" aria-hidden="true" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);opacity:0" data-wm="${wm}">\u200B${wm}\u200B</span>` : "")
       + `<div class="chapter-end">
           <div class="ce-title">End of ${esc(ch.title || title)}</div>
           <div class="ce-actions">
@@ -79,10 +113,10 @@ document.addEventListener("app:ready", async () => {
     $("#shareBtn")?.addEventListener("click", share);
   }
   try { renderChapter(await DB.chapter(n.slug, c)); }
-  catch (e) { content.innerHTML = `<div class="empty">${I.search}<div>Failed to load chapter: ${esc(e.message)}</div></div>`; }
+  catch (e) { renderGate(e); }
   // in-place chapter switch (used by TTS auto-continue so audio keeps playing in background)
   async function loadChapter(cc) {
-    const ch = await DB.chapter(n.slug, cc);
+    const ch = await DB.chapter(n.slug, cc); // real navigation → counts toward the account quota
     c = cc; title = titleOf(c); Lib.mark(n.id, c); countView();
     document.title = `${n.title} - ${title} | Novelxplin`;
     $("#rtTitle").innerHTML = `<a href="${U.novel(n.slug)}">${esc(n.title)}</a> <span style="color:var(--muted)">/ ${esc(title)}</span>`;
@@ -91,7 +125,6 @@ document.addEventListener("app:ready", async () => {
     try { history.pushState({ c }, "", link(c)); } catch { }
     scrollTo(0, 0);
     bindComments(); // comments follow the chapter that is actually on screen
-    if (nextNum() != null) DB.chapter(n.slug, nextNum()).catch(() => { });
   }
   addEventListener("popstate", () => location.reload());
 
@@ -102,11 +135,12 @@ document.addEventListener("app:ready", async () => {
   }
   $("#shareBtn")?.addEventListener("click", share);
 
-  // prefetch next chapter (API + HTML) so "Next" feels instant (does not count as a view)
-  if (nextNum() != null) {
-    DB.chapter(n.slug, nextNum()).catch(() => { });
+  // prefetch the next chapter's HTML shell so "Next" feels instant. The chapter TEXT is no longer
+  // prefetched: it is login-gated + quota-counted per account, and the API answers no-store, so a
+  // speculative fetch would only cost bandwidth. Quota is charged only when a chapter is opened.
+  if (nextNum() != null && paras.length) {
     const pf = u => { const l = document.createElement("link"); l.rel = "prefetch"; l.href = u; document.head.appendChild(l); };
-    pf(link(nextNum())); // API prefetch is done via DB.chapter() (needs the X-NX-Token header)
+    pf(link(nextNum()));
   }
 
   /* ---------- settings ---------- */
@@ -219,6 +253,7 @@ document.addEventListener("app:ready", async () => {
   const pEls = () => $$("#content p[data-i]");
   // make text pleasant to hear: drop URLs / decorative separators, tame "!!!" and "......", expand a few shorthands
   const speakable = t => String(t || "")
+    .replace(/[\u200B-\u200D\u2060\uFEFF]/g, "") // zero-width watermark chars must never reach the voice engine
     .replace(/https?:\/\/\S+|www\.\S+/gi, "")
     .replace(/^[\s*\-_=~#•·.]{3,}$/g, "")
     .replace(/([!?])\1{1,}/g, "$1").replace(/\.{3,}/g, "…").replace(/[*_~`#>]+/g, " ")
@@ -368,7 +403,7 @@ document.addEventListener("app:ready", async () => {
   let nextWarm = 0;
   function warmNext() {
     if (nextWarm === c || nextNum() == null || !relay()) return; nextWarm = c;
-    DB.chapter(n.slug, nextNum()).then(ch => { const body = Array.isArray(ch.body) ? ch.body : String(ch.body || "").split(/\n{2,}|\n/).filter(Boolean); body.slice(0, 2).map(speakable).filter(Boolean).forEach(t => TT.edge(t, voiceArg().replace(/^edge:/, ""), prefs.ttsRate, null, prefs.ttsPitch).then(u => { try { URL.revokeObjectURL(u); } catch { } }).catch(() => { })); }).catch(() => { });
+    DB.chapter(n.slug, nextNum(), { prefetch: true }).then(ch => { /* TTS warm-up: served without charging quota */ const body = Array.isArray(ch.body) ? ch.body : String(ch.body || "").split(/\n{2,}|\n/).filter(Boolean); body.slice(0, 2).map(speakable).filter(Boolean).forEach(t => TT.edge(t, voiceArg().replace(/^edge:/, ""), prefs.ttsRate, null, prefs.ttsPitch).then(u => { try { URL.revokeObjectURL(u); } catch { } }).catch(() => { })); }).catch(() => { });
   }
   const WPM = 165; // neural voices at 1x
   function remaining(i) {
