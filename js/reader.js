@@ -83,9 +83,9 @@ document.addEventListener("app:ready", async () => {
 
   // prefetch next chapter (API + HTML) so "Next" feels instant
   if (c < n.chapters) {
+    DB.chapter(n.slug, c + 1).catch(() => { });
     const pf = u => { const l = document.createElement("link"); l.rel = "prefetch"; l.href = u; document.head.appendChild(l); };
-    pf(`/api/novels/${encodeURIComponent(n.slug)}/chapters/${c + 1}`);
-    pf(link(c + 1));
+    pf(link(c + 1)); // API prefetch is done via DB.chapter() (needs the X-NX-Token header)
   }
 
   /* ---------- settings ---------- */
