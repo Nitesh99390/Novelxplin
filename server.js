@@ -96,7 +96,7 @@ async function refreshNovelStats(n) {
   const last = list[list.length - 1];
   n.latest = last ? { num: last.num, title: last.title } : null;
   n.updatedAt = Date.now();
-  saveCatalog();
+  saveCatalog(); smInvalidate();
 }
 
 /* ---------- Firebase ID-token verification (RS256 via Google certs) ---------- */
@@ -162,6 +162,123 @@ async function readJSON(req, limit) { const b = await readBody(req, limit); try 
 const splitParas = t => String(t || "").replace(/\r/g, "").split(/\n\s*\n|\n/).map(s => s.trim()).filter(Boolean);
 const MIME = { ".html": "text/html; charset=utf-8", ".js": "application/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".svg": "image/svg+xml", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".gif": "image/gif", ".json": "application/json", ".ico": "image/x-icon", ".txt": "text/plain; charset=utf-8", ".woff2": "font/woff2" };
 
+/* ---------- SEO: robots.txt + dynamic XML sitemaps ----------
+   /sitemap.xml                     → sitemap index (lists everything below)
+   /sitemap-pages.xml               → static pages + genre listing pages
+   /sitemap-novels.xml              → one <url> per novel (+ cover image)
+   /sitemap-chapters-<slug>.xml     → every chapter of one novel (read.html?n=&c=)
+   All generated from the in-memory catalog, cached for 10 min, gzip on request.
+   Canonical host comes from SITE_URL env (fallback: request Host header).   */
+//   PUBLIC_URL=https://novelxplin.in  (preferred)  → else SITE_URL if it is a real
+//   domain (a bare IP like http://144.24.x.x is ignored) → else request Host header.
+const isIpUrl = u => /^https?:\/\/(\d{1,3}\.){3}\d{1,3}(:\d+)?\/?$/i.test(u) || /^https?:\/\/localhost/i.test(u);
+const SITE_URL = ([process.env.PUBLIC_URL, process.env.SITE_URL].map(u => (u || "").trim().replace(/\/$/, "")).find(u => u && !isIpUrl(u))) || "";
+const xmlEsc = s => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;");
+const isoDate = ms => { const d = ms ? new Date(ms) : new Date(); return (isNaN(d) ? new Date() : d).toISOString().slice(0, 10); };
+const smCache = new Map(); // key -> { exp, body }
+const SM_TTL = 10 * 60 * 1000;
+function smGet(key, build) {
+  const hit = smCache.get(key); if (hit && hit.exp > Date.now()) return hit.body;
+  const body = build(); smCache.set(key, { exp: Date.now() + SM_TTL, body }); return body;
+}
+function siteBase(req) {
+  if (SITE_URL) return SITE_URL;
+  const proto = (req.headers["x-forwarded-proto"] || "").split(",")[0].trim() || "https";
+  const host = (req.headers["x-forwarded-host"] || req.headers.host || "localhost").split(",")[0].trim();
+  return `${proto}://${host}`;
+}
+function urlTag(loc, lastmod, changefreq, priority, extra) {
+  return `  <url>\n    <loc>${xmlEsc(loc)}</loc>` +
+    (lastmod ? `\n    <lastmod>${lastmod}</lastmod>` : "") +
+    (changefreq ? `\n    <changefreq>${changefreq}</changefreq>` : "") +
+    (priority != null ? `\n    <priority>${priority}</priority>` : "") +
+    (extra ? `\n${extra}` : "") + `\n  </url>`;
+}
+const SM_HEAD = `<?xml version="1.0" encoding="UTF-8"?>\n`;
+const URLSET_OPEN = `<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:image="http://www.google.com/schemas/sitemap-image/1.1">\n`;
+function buildSitemapIndex(base) {
+  const newest = catalog.reduce((m, n) => Math.max(m, n.updatedAt || 0), 0);
+  const items = [
+    { loc: `${base}/sitemap-pages.xml`, lastmod: isoDate(newest) },
+    { loc: `${base}/sitemap-novels.xml`, lastmod: isoDate(newest) },
+    ...catalog.filter(n => n.chapters > 0).map(n => ({ loc: `${base}/sitemap-chapters-${n.slug}.xml`, lastmod: isoDate(n.updatedAt) })),
+  ];
+  return SM_HEAD + `<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n` +
+    items.map(i => `  <sitemap>\n    <loc>${xmlEsc(i.loc)}</loc>\n    <lastmod>${i.lastmod}</lastmod>\n  </sitemap>`).join("\n") + `\n</sitemapindex>\n`;
+}
+function buildPagesSitemap(base) {
+  const today = isoDate();
+  const out = [
+    urlTag(`${base}/`, today, "daily", "1.0"),
+    urlTag(`${base}/list.html`, today, "daily", "0.8"),
+    urlTag(`${base}/list.html?sort=latest-novel`, today, "daily", "0.7"),
+    urlTag(`${base}/list.html?sort=top-rated`, today, "weekly", "0.6"),
+    urlTag(`${base}/list.html?status=completed`, today, "weekly", "0.6"),
+    urlTag(`${base}/finder.html`, today, "weekly", "0.5"),
+    urlTag(`${base}/library.html`, today, "monthly", "0.3"),
+  ];
+  const genres = [...new Set(catalog.flatMap(n => n.genres || []))].sort();
+  for (const g of genres) out.push(urlTag(`${base}/genre.html?g=${encodeURIComponent(g)}`, today, "weekly", "0.6"));
+  return SM_HEAD + URLSET_OPEN + out.join("\n") + `\n</urlset>\n`;
+}
+function buildNovelsSitemap(base) {
+  const out = catalog.map(n => {
+    const img = n.cover ? `    <image:image>\n      <image:loc>${xmlEsc(/^https?:/i.test(n.cover) ? n.cover : base + n.cover)}</image:loc>\n      <image:title>${xmlEsc(n.title)}</image:title>\n    </image:image>` : "";
+    const freq = n.status === "Completed" ? "monthly" : "daily";
+    const pri = n.hot ? "0.9" : "0.8";
+    return urlTag(`${base}/novel.html?n=${encodeURIComponent(n.slug)}`, isoDate(n.updatedAt), freq, pri, img);
+  });
+  return SM_HEAD + URLSET_OPEN + out.join("\n") + `\n</urlset>\n`;
+}
+async function buildChaptersSitemap(base, n) {
+  const list = await chapterIndex(n.slug);
+  const freq = n.status === "Completed" ? "yearly" : "monthly";
+  const out = list.map((c, i) => {
+    const isLatest = i >= list.length - 3;
+    return urlTag(`${base}/read.html?n=${encodeURIComponent(n.slug)}&c=${c.num}`, isoDate(c.date ? Date.parse(c.date) : n.updatedAt), isLatest ? "weekly" : freq, isLatest ? "0.6" : "0.5");
+  });
+  return SM_HEAD + URLSET_OPEN + out.join("\n") + `\n</urlset>\n`;
+}
+function buildRobots(base) {
+  return [
+    "User-agent: *",
+    "Allow: /",
+    "Disallow: /admin.html",
+    "Disallow: /api/",
+    "Disallow: /library.html",
+    "Disallow: /search.html?",
+    "Disallow: /*?*q=",
+    "",
+    `Sitemap: ${base}/sitemap.xml`,
+    "",
+  ].join("\n");
+}
+function sendXML(req, res, xml, maxAge) {
+  const headers = { "Content-Type": "application/xml; charset=utf-8", "Cache-Control": `public, max-age=${maxAge || 600}`, "X-Robots-Tag": "noindex" };
+  if (/\bgzip\b/.test(req.headers["accept-encoding"] || "")) { headers["Content-Encoding"] = "gzip"; return send(res, 200, zlib.gzipSync(Buffer.from(xml)), headers); }
+  return send(res, 200, xml, headers);
+}
+async function handleSEO(req, res, p) {
+  if (req.method !== "GET" && req.method !== "HEAD") return false;
+  const base = siteBase(req);
+  if (p === "/robots.txt") { send(res, 200, buildRobots(base), { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "public, max-age=3600" }); return true; }
+  if (p === "/sitemap.xml" || p === "/sitemap_index.xml") { sendXML(req, res, smGet("index:" + base, () => buildSitemapIndex(base))); return true; }
+  if (p === "/sitemap-pages.xml") { sendXML(req, res, smGet("pages:" + base, () => buildPagesSitemap(base))); return true; }
+  if (p === "/sitemap-novels.xml") { sendXML(req, res, smGet("novels:" + base, () => buildNovelsSitemap(base))); return true; }
+  const m = /^\/sitemap-chapters-([a-z0-9-]+)\.xml$/.exec(p);
+  if (m) {
+    const n = bySlug(m[1]); if (!n) { send(res, 404, "Not found"); return true; }
+    const key = `chap:${base}:${n.slug}:${n.updatedAt}`;
+    const hit = smCache.get(key);
+    let xml;
+    if (hit && hit.exp > Date.now()) xml = hit.body;
+    else { xml = await buildChaptersSitemap(base, n); smCache.set(key, { exp: Date.now() + SM_TTL, body: xml }); }
+    sendXML(req, res, xml, 1800); return true;
+  }
+  return false;
+}
+const smInvalidate = () => smCache.clear(); // call whenever novels/chapters change (not on view counts)
+
 function publicNovel(n) { const { ...o } = n; return o; }
 function sanitizeNovel(body, existing) {
   const n = existing || {};
@@ -186,7 +303,7 @@ function createNovel(body) {
   let s = slugify(body.slug || n.title) || "novel"; let base = s, i = 2; while (bySlug(s)) s = `${base}-${i++}`;
   Object.assign(n, { slug: s, chapters: 0, views: 0, votes: 0, latest: null, createdAt: Date.now(), updatedAt: Date.now() });
   n.rating = n.rating || 0; n.genres = n.genres && n.genres.length ? n.genres : ["Fantasy"]; n.lang = n.lang || "English Novel"; n.status = n.status || "Ongoing"; n.summary = n.summary || [];
-  catalog.unshift(n); fs.mkdirSync(chapDir(s), { recursive: true }); saveCatalog();
+  catalog.unshift(n); fs.mkdirSync(chapDir(s), { recursive: true }); saveCatalog(); smInvalidate();
   return n;
 }
 async function addChapters(n, list) {
@@ -270,8 +387,8 @@ async function handle(req, res) {
       if (!n) return send(res, 404, { error: "Novel not found" });
       if (!sub) {
         if (req.method === "GET") return send(res, 200, n);
-        if (req.method === "PUT") { await requireAdmin(req); const body = await readJSON(req, 2 * 1024 * 1024); sanitizeNovel(body, n); n.updatedAt = Date.now(); saveCatalog(); return send(res, 200, n); }
-        if (req.method === "DELETE") { await requireAdmin(req); catalog = catalog.filter(x => x.slug !== slug); saveCatalog(); await fsp.rm(chapDir(slug), { recursive: true, force: true }); return send(res, 200, { ok: true }); }
+        if (req.method === "PUT") { await requireAdmin(req); const body = await readJSON(req, 2 * 1024 * 1024); sanitizeNovel(body, n); n.updatedAt = Date.now(); saveCatalog(); smInvalidate(); return send(res, 200, n); }
+        if (req.method === "DELETE") { await requireAdmin(req); catalog = catalog.filter(x => x.slug !== slug); saveCatalog(); smInvalidate(); await fsp.rm(chapDir(slug), { recursive: true, force: true }); return send(res, 200, { ok: true }); }
       }
       if (sub === "view" && req.method === "POST") { n.views = (n.views || 0) + 1; saveCatalog(); return send(res, 200, { views: n.views }); }
       if (sub === "chapters") {
@@ -323,6 +440,9 @@ async function handle(req, res) {
     return send(res, 404, { error: "Not found" });
   }
 
+  // ---- SEO: robots.txt + sitemaps ----
+  if (await handleSEO(req, res, p)) return;
+
   // ---- static files ----
   if (req.method !== "GET" && req.method !== "HEAD") return send(res, 405, "Method not allowed");
   let file = p === "/" ? "/index.html" : p;
@@ -356,7 +476,7 @@ if (process.env.TELEGRAM_BOT_TOKEN) {
       getNovel: async slug => bySlug(slug) || null,
       findByTitle: async title => catalog.find(n => n.title.toLowerCase() === String(title).toLowerCase()) || null,
       createNovel: async body => createNovel(body),
-      updateNovel: async (slug, body) => { const n = bySlug(slug); if (!n) throw new Error("Novel not found"); sanitizeNovel(Object.assign({ title: n.title }, body), n); n.updatedAt = Date.now(); saveCatalog(); return n; },
+      updateNovel: async (slug, body) => { const n = bySlug(slug); if (!n) throw new Error("Novel not found"); sanitizeNovel(Object.assign({ title: n.title }, body), n); n.updatedAt = Date.now(); saveCatalog(); smInvalidate(); return n; },
       chapterIndex,
       addChapters: async (slug, list) => { const n = bySlug(slug); if (!n) throw new Error("Novel not found"); return addChapters(n, list); },
       saveImage,
