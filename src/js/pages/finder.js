@@ -21,7 +21,7 @@ document.addEventListener("app:ready", () => {
       (!st || n.status === st) &&
       (!ch || (n.chapters >= +ch.split("-")[0] && n.chapters < +ch.split("-")[1]))
     );
-    const s = { popular: (a, b) => b.views - a.views, rating: (a, b) => b.rating - a.rating, updated: (a, b) => a.updatedMinutesAgo - b.updatedMinutesAgo, chapters: (a, b) => b.chapters - a.chapters, new: (a, b) => b.id - a.id };
+    const s = { popular: (a, b) => b.views - a.views, rating: (a, b) => b.rating - a.rating, updated: (a, b) => a.updatedMinutesAgo - b.updatedMinutesAgo, chapters: (a, b) => b.chapters - a.chapters, new: (a, b) => (b.createdAt || 0) - (a.createdAt || 0) }; // id is a slug string – never subtract it
     list.sort(s[sort] || s.popular);
     $("#count").textContent = `${list.length} novels`;
     $("#grid").innerHTML = list.length ? list.map(n => nCard(n, { showFull: true, fullRibbon: true })).join("") : `<div class="empty" style="grid-column:1/-1">${I.search}<div>No novels match these filters.</div></div>`;

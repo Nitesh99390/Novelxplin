@@ -9,8 +9,29 @@ document.addEventListener("app:ready", async () => {
   const { $, $$, esc, q, U, I } = UI;
   const n = DB.get(q.get("n"));
   let c = Math.max(1, parseInt(q.get("c") || "1", 10));
-  if (!n || c > n.chapters) { SK.clear(); $("#content").innerHTML = `<div class="empty">${I.search}<div>Chapter not found.</div></div>`; return; }
+  if (!n) { SK.clear(); $("#content").innerHTML = `<div class="empty">${I.search}<div>Chapter not found.</div></div>`; return; }
+  // Navigation is driven by the chapter INDEX (real chapter numbers), never by c ± 1 or by
+  // n.chapters (which is a file count): EPUBs may start at 501, skip numbers or have gaps.
+  let index = [];
+  try { index = await DB.chapters(n.slug); } catch { }
+  if (!index.length && n.chapters > 0) { // index API unreachable → best-effort 1..latest so Prev/Next still work
+    const last = (n.latest && n.latest.num) || n.chapters;
+    index = Array.from({ length: last }, (_, i) => ({ num: i + 1, title: DB.chapterTitle(n, i + 1) }));
+  }
+  const pos = () => index.findIndex(i => i.num === c);
+  // neighbours by index position; when c itself is missing, fall back to the nearest existing numbers
+  const prevNum = () => { const i = pos(); if (i >= 0) return i > 0 ? index[i - 1].num : null; const x = index.filter(x => x.num < c).pop(); return x ? x.num : null; };
+  const nextNum = () => { const i = pos(); if (i >= 0) return i < index.length - 1 ? index[i + 1].num : null; const x = index.find(x => x.num > c); return x ? x.num : null; };
+  if (index.length && pos() < 0) {
+    SK.clear();
+    const near = nextNum() ?? prevNum();
+    $("#content").innerHTML = `<div class="empty">${I.search}<div>Chapter ${c} not found.</div>${near ? `<p style="margin-top:10px"><a class="btn" href="${U.chapter(n.slug, near)}">Go to Chapter ${near}</a></p>` : ""}<p style="margin-top:8px"><a href="${U.novel(n.slug)}">Back to chapter list</a></p></div>`;
+    return;
+  }
   Lib.mark(n.id, c);
+  // count one view per chapter actually opened (server ignores GET-based prefetches)
+  const countView = () => DB.api(`/api/novels/${encodeURIComponent(n.slug)}/view`, { method: "POST" }).catch(() => { });
+  countView();
 
   /* ---------- top bar ---------- */
   $(".reader-top a[title=Home]").innerHTML = I.home;
@@ -20,8 +41,6 @@ document.addEventListener("app:ready", async () => {
   libBtn.addEventListener("click", e => { e.preventDefault(); const a = Lib.toggle(n.id); setLib(); toast(a ? "Added to your library" : "Removed from library"); });
 
   const link = cc => U.chapter(n.slug, cc);
-  let index = [];
-  try { index = await DB.chapters(n.slug); } catch { }
   const titleOf = cc => { const x = index.find(i => i.num === cc); return x && x.title ? x.title : `Chapter ${cc}`; };
   let title = titleOf(c);
   document.title = `${n.title} - ${title} | Novelxplin`;
@@ -29,10 +48,11 @@ document.addEventListener("app:ready", async () => {
 
   function nav() {
     const sel = `<select onchange="location.href=this.value" aria-label="Jump to chapter">${index.map(ch => `<option value="${link(ch.num)}" ${ch.num === c ? "selected" : ""}>${esc(ch.title || "Chapter " + ch.num)}</option>`).join("")}</select>`;
-    return `<a class="btn alt ${c <= 1 ? "disabled" : ""}" href="${link(c - 1)}">${I.left} Prev</a>
+    const pv = prevNum(), nx = nextNum();
+    return `<a class="btn alt ${pv == null ? "disabled" : ""}" href="${pv == null ? U.novel(n.slug) : link(pv)}">${I.left} Prev</a>
       <a class="btn ghost" href="${U.novel(n.slug)}">${I.list} Index</a>
       ${sel}
-      <a class="btn ${c >= n.chapters ? "disabled" : ""}" href="${link(c + 1)}">Next ${I.right}</a>`;
+      <a class="btn ${nx == null ? "disabled" : ""}" href="${nx == null ? U.novel(n.slug) : link(nx)}">Next ${I.right}</a>`;
   }
   $("#navTop").innerHTML = nav(); $("#navBottom").innerHTML = nav();
 
@@ -51,8 +71,8 @@ document.addEventListener("app:ready", async () => {
       + `<div class="chapter-end">
           <div class="ce-title">End of ${esc(ch.title || title)}</div>
           <div class="ce-actions">
-            ${c > 1 ? `<a class="btn ghost" href="${link(c - 1)}">${I.left} Previous</a>` : ""}
-            ${c < n.chapters ? `<a class="btn" href="${link(c + 1)}">Next chapter ${I.right}</a>` : `<a class="btn" href="${U.novel(n.slug)}">${I.check} You're all caught up</a>`}
+            ${prevNum() != null ? `<a class="btn ghost" href="${link(prevNum())}">${I.left} Previous</a>` : ""}
+            ${nextNum() != null ? `<a class="btn" href="${link(nextNum())}">Next chapter ${I.right}</a>` : `<a class="btn" href="${U.novel(n.slug)}">${I.check} You're all caught up</a>`}
           </div>
           <button class="btn ghost small" id="shareBtn">${I.horn} Share chapter</button>
         </div>`;
@@ -63,14 +83,15 @@ document.addEventListener("app:ready", async () => {
   // in-place chapter switch (used by TTS auto-continue so audio keeps playing in background)
   async function loadChapter(cc) {
     const ch = await DB.chapter(n.slug, cc);
-    c = cc; title = titleOf(c); Lib.mark(n.id, c);
+    c = cc; title = titleOf(c); Lib.mark(n.id, c); countView();
     document.title = `${n.title} - ${title} | Novelxplin`;
     $("#rtTitle").innerHTML = `<a href="${U.novel(n.slug)}">${esc(n.title)}</a> <span style="color:var(--muted)">/ ${esc(title)}</span>`;
     $("#navTop").innerHTML = nav(); $("#navBottom").innerHTML = nav();
     renderChapter(ch);
     try { history.pushState({ c }, "", link(c)); } catch { }
     scrollTo(0, 0);
-    if (c < n.chapters) DB.chapter(n.slug, c + 1).catch(() => { });
+    bindComments(); // comments follow the chapter that is actually on screen
+    if (nextNum() != null) DB.chapter(n.slug, nextNum()).catch(() => { });
   }
   addEventListener("popstate", () => location.reload());
 
@@ -81,11 +102,11 @@ document.addEventListener("app:ready", async () => {
   }
   $("#shareBtn")?.addEventListener("click", share);
 
-  // prefetch next chapter (API + HTML) so "Next" feels instant
-  if (c < n.chapters) {
-    DB.chapter(n.slug, c + 1).catch(() => { });
+  // prefetch next chapter (API + HTML) so "Next" feels instant (does not count as a view)
+  if (nextNum() != null) {
+    DB.chapter(n.slug, nextNum()).catch(() => { });
     const pf = u => { const l = document.createElement("link"); l.rel = "prefetch"; l.href = u; document.head.appendChild(l); };
-    pf(link(c + 1)); // API prefetch is done via DB.chapter() (needs the X-NX-Token header)
+    pf(link(nextNum())); // API prefetch is done via DB.chapter() (needs the X-NX-Token header)
   }
 
   /* ---------- settings ---------- */
@@ -346,8 +367,8 @@ document.addEventListener("app:ready", async () => {
   // warm the server cache for the first lines of the next chapter so auto-continue is seamless
   let nextWarm = 0;
   function warmNext() {
-    if (nextWarm === c || c >= n.chapters || !relay()) return; nextWarm = c;
-    DB.chapter(n.slug, c + 1).then(ch => { const body = Array.isArray(ch.body) ? ch.body : String(ch.body || "").split(/\n{2,}|\n/).filter(Boolean); body.slice(0, 2).map(speakable).filter(Boolean).forEach(t => TT.edge(t, voiceArg().replace(/^edge:/, ""), prefs.ttsRate, null, prefs.ttsPitch).then(u => { try { URL.revokeObjectURL(u); } catch { } }).catch(() => { })); }).catch(() => { });
+    if (nextWarm === c || nextNum() == null || !relay()) return; nextWarm = c;
+    DB.chapter(n.slug, nextNum()).then(ch => { const body = Array.isArray(ch.body) ? ch.body : String(ch.body || "").split(/\n{2,}|\n/).filter(Boolean); body.slice(0, 2).map(speakable).filter(Boolean).forEach(t => TT.edge(t, voiceArg().replace(/^edge:/, ""), prefs.ttsRate, null, prefs.ttsPitch).then(u => { try { URL.revokeObjectURL(u); } catch { } }).catch(() => { })); }).catch(() => { });
   }
   const WPM = 165; // neural voices at 1x
   function remaining(i) {
@@ -396,12 +417,13 @@ document.addEventListener("app:ready", async () => {
 
   async function nextChapter() {
     if (sleepMode === "chapter") { setTts(false); toast("Chapter finished – sleep timer stopped listening"); return; }
-    if (c >= n.chapters) { setTts(false); toast("You're all caught up"); return; }
+    const nx = nextNum();
+    if (nx == null) { setTts(false); toast("You're all caught up"); return; }
     setStatus("next…");
     const seq = ttsSeq;
     try {
       cache.clear(); relBlobs();
-      await loadChapter(c + 1);
+      await loadChapter(nx);
       if (!ttsOn || seq !== ttsSeq) return;
       toast(`Now playing: ${title}`);
       speak(0);
@@ -491,8 +513,8 @@ document.addEventListener("app:ready", async () => {
     if (e.key === " " && ttsOn) { e.preventDefault(); togglePause(!paused); }
     if (ttsOn && (e.key === "[" || e.key === "]")) { follow = true; setTts(true, e.key === "[" ? Math.max(0, ttsIdx - 1) : ttsIdx + 1); return; }
     if (ttsOn && (e.key === "," || e.key === ".")) { prefs.ttsRate = +(prefs.ttsRate + (e.key === "." ? .1 : -.1)).toFixed(1); applyRate(); return; }
-    if (e.key === "ArrowLeft" && c > 1) location.href = link(c - 1);
-    if (e.key === "ArrowRight" && c < n.chapters) location.href = link(c + 1);
+    if (e.key === "ArrowLeft" && prevNum() != null) location.href = link(prevNum());
+    if (e.key === "ArrowRight" && nextNum() != null) location.href = link(nextNum());
     const k = e.key.toLowerCase();
     if (k === "f") setFocus(!document.body.classList.contains("focus-mode"));
     if (k === "s") setAuto(!autoOn);
@@ -507,18 +529,25 @@ document.addEventListener("app:ready", async () => {
   addEventListener("touchend", e => {
     const t = e.changedTouches[0], dx = t.clientX - tx, dy = t.clientY - ty;
     if (Date.now() - tt > 600 || Math.abs(dx) < 80 || Math.abs(dy) > 60 || tx < 24) return; // ignore slow / vertical / edge-back gestures
-    if (dx < 0 && c < n.chapters) { toast("Next chapter →"); location.href = link(c + 1); }
-    else if (dx > 0 && c > 1) { toast("← Previous chapter"); location.href = link(c - 1); }
+    if (dx < 0 && nextNum() != null) { toast("Next chapter →"); location.href = link(nextNum()); }
+    else if (dx > 0 && prevNum() != null) { toast("← Previous chapter"); location.href = link(prevNum()); }
   }, { passive: true });
 
-  /* ---------- comments – Firestore when available, else local ---------- */
-  const ckey = `nx_comments_${n.id}_${c}`;
+  /* ---------- comments – Firestore when available, else local ----------
+     Bound to the chapter currently shown; re-bound by loadChapter() when TTS auto-continues. */
   const colors = ["#e67e22", "#1e73be", "#2e9e4f", "#7e57c2", "#e53935"];
-  const col = window.firebase && Auth.enabled ? firebase.firestore().collection("comments").doc(n.slug).collection(String(c)) : null;
-  const show = list => $("#comments").innerHTML = list.length ? list.map((cm, i) => `<div class="comment"><div class="avatar" style="background:${colors[i % colors.length]}">${esc((cm.who || "?")[0])}</div><div><div class="who">${esc(cm.who)}<small>${DB.timeAgo(Math.round((Date.now() - cm.at) / 6e4))}</small></div><p>${esc(cm.text)}</p></div></div>`).join("") : `<p style="color:var(--muted);font-size:12px;margin-top:10px">No comments yet. Be the first!</p>`;
+  let ckey = "", col = null, cSeq = 0;
+  const show = (list, seq) => { if (seq !== cSeq) return; $("#comments").innerHTML = list.length ? list.map((cm, i) => `<div class="comment"><div class="avatar" style="background:${colors[i % colors.length]}">${esc((cm.who || "?")[0])}</div><div><div class="who">${esc(cm.who)}<small>${DB.timeAgo(Math.round((Date.now() - cm.at) / 6e4))}</small></div><p>${esc(cm.text)}</p></div></div>`).join("") : `<p style="color:var(--muted);font-size:12px;margin-top:10px">No comments yet. Be the first!</p>`; };
   async function renderComments() {
-    if (col) { try { const s = await Promise.race([col.orderBy("at", "desc").limit(50).get(), new Promise((_, rej) => setTimeout(() => rej(new Error("comments timeout")), 8000))]); return show(s.docs.map(d => d.data())); } catch (e) { console.warn(e); } }
-    show(JSON.parse(localStorage.getItem(ckey) || "[]"));
+    const seq = cSeq, k = ckey, cl = col;
+    if (cl) { try { const s = await Promise.race([cl.orderBy("at", "desc").limit(50).get(), new Promise((_, rej) => setTimeout(() => rej(new Error("comments timeout")), 8000))]); return show(s.docs.map(d => d.data()), seq); } catch (e) { console.warn(e); } }
+    show(JSON.parse(localStorage.getItem(k) || "[]"), seq);
+  }
+  function bindComments() {
+    cSeq++; ckey = `nx_comments_${n.id}_${c}`;
+    col = window.firebase && Auth.enabled ? firebase.firestore().collection("comments").doc(n.slug).collection(String(c)) : null;
+    const ta = $("#cText"); if (ta) ta.value = "";
+    renderComments();
   }
   $("#cPost").addEventListener("click", async () => {
     const u = Auth.user(); if (!u) { openLogin(); return; }
@@ -528,5 +557,5 @@ document.addEventListener("app:ready", async () => {
     else { const list = JSON.parse(localStorage.getItem(ckey) || "[]"); list.unshift(cm); localStorage.setItem(ckey, JSON.stringify(list)); }
     $("#cText").value = ""; renderComments(); toast("Comment posted");
   });
-  renderComments();
+  bindComments();
 });

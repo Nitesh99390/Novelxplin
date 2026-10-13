@@ -15,7 +15,7 @@
        /novel/<slug>/chapter-<c>      → read.html    (n, c)
        /genre/<genre-slug>[/ongoing|/completed][/page/2]
        /latest-novels | /latest-release | /most-popular | /completed-novels [/status][/page/N]
-       /search/<term>[/page/2]        → search.html  (q)
+       /search/<term>[/ongoing|/completed][/page/2]  → search.html  (q, status)
        /library · /finder · /admin[/<slug>]
      Legacy *.html?x= URLs are 301-redirected by the server, but we still parse
      their query string so nothing breaks if the page is opened directly. */
@@ -36,7 +36,7 @@
       if (m) { r.page = "read"; r.params.c = m[1]; } else r.page = "novel";
     } else if (a === "genre" && b) { r.page = "genre"; r.params.g = b; status(c); }
     else if (PATH_SORTS[a]) { r.page = "list"; r.params.sort = PATH_SORTS[a]; status(b); }
-    else if (a === "search") { r.page = "search"; if (b) r.params.q = b; }
+    else if (a === "search") { r.page = "search"; if (b) r.params.q = b; status(c); }
     else if (a === "library" || a === "finder") r.page = a;
     else if (a === "admin") { r.page = "admin"; if (b) r.params.n = b; }
     else if (/\.html$/i.test(a)) r.page = a.replace(/\.html$/i, "");
@@ -282,7 +282,7 @@
     return `<div class="n-card">${cover(n, opts)}<div><h3 class="truncate"><a href="${U.novel(n.slug)}">${esc(n.title)}</a>${n.hot ? '<span class="badge-hot">HOT</span>' : ""}</h3>${stars(n.rating)}${metaLines(n, opts)}</div></div>`;
   }
   function releaseRow(n) {
-    const ch = n.chapters;
+    const ch = DB.latestNum(n); // real latest chapter number, not the file count
     const ct = DB.chapterTitle(n, ch).replace(/^Chapter\s*\d+\s*[:\-]?\s*/i, "") || String(ch);
     return `<li>
       ${cover(n)}

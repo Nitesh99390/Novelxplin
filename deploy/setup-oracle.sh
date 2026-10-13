@@ -13,6 +13,14 @@ if ! command -v node >/dev/null 2>&1 || [ "$(node -v | cut -c2-3)" -lt 18 ]; the
   sudo apt-get install -y nodejs
 fi
 
+echo "==> Building the frontend (src/ -> dist/; server.js only serves dist/)"
+cd "$APP_DIR"
+[ -f src/js/config.js ] || echo "!! src/js/config.js missing (Firebase config + ADMIN_EMAILS) - site will run without login" >&2
+# devDependencies (vite + obfuscator) are needed for the build even in production
+NODE_ENV=development npm ci --no-audit --no-fund 2>/dev/null || NODE_ENV=development npm install --no-audit --no-fund
+npm run build
+[ -f dist/index.html ] || { echo "!! Build failed - dist/index.html not found" >&2; exit 1; }
+
 echo "==> Adding 1 GB swap (helps a 1 GB RAM box)"
 if [ ! -f /swapfile ]; then
   sudo fallocate -l 1G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile
@@ -64,4 +72,5 @@ sudo netfilter-persistent save 2>/dev/null || true
 echo
 echo "Done. Open:  http://$(curl -s ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')/"
 echo "Logs:        sudo journalctl -u novelxplin -f"
+echo "Update:      git pull && npm run build && sudo systemctl restart novelxplin   (or: bash deploy/update.sh)"
 echo "Backup:      bash deploy/backup.sh"
