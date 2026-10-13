@@ -34,9 +34,10 @@
     return nxToken;
   }
   // Chapter text is login-gated on the server: attach the Firebase ID token when we have one.
+  // Auth.token() returns the sessionStorage-cached ID token instantly (no wait for Firebase's
+  // cold-start session restore); it only awaits Auth.ready when there is no cached token.
   async function authHeader() {
     try {
-      if (window.Auth && Auth.ready) await Promise.race([Auth.ready, new Promise(r => setTimeout(r, 4000))]);
       const tok = window.Auth && Auth.token ? await Auth.token() : null;
       return tok ? { Authorization: "Bearer " + tok } : {};
     } catch { return {}; }
@@ -49,6 +50,7 @@
     if (!r.ok) {
       let m = r.statusText, code = "", extra = {}; try { const j = await r.json(); m = j.error || m; code = j.code || ""; extra = j; } catch { }
       if (r.status === 403 && code === "token" && !retry && await refreshToken()) return api(path, opts, true);
+      if (r.status === 401 && !retry && opts.headers.Authorization && window.Auth && Auth.refreshToken) { const t = await Auth.refreshToken(); if (t) { opts.headers.Authorization = "Bearer " + t; return api(path, opts, true); } }
       if (r.status === 429 && code !== "quota") m = "Too many requests – please wait a moment";
       const err = new Error(m); err.status = r.status; err.code = code || (r.status === 401 ? "login" : "");
       err.used = extra.used; err.limit = extra.limit; err.retry = extra.retry || +r.headers.get("Retry-After") || 0;

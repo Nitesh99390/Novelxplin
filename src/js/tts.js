@@ -1,70 +1,117 @@
 /* =========================================================
-   Novelxplin – Listen engines
-   • "edge"   – Microsoft Edge neural voices. Since Oct-2026 Microsoft only
-                accepts the Edge browser itself, so the tiny Node server relays
-                the request (/api/tts) and streams back MP3 (~50 KB/paragraph).
-   • "google" – Google Translate TTS (what the gTTS library uses). Played
-                straight from Google into <audio> – zero server load.
-   • "device" – browser speechSynthesis (handled by reader.js).
+   Novelxplin – Listen engine (100 % client-side)
+   Speech is produced by the browser's own Web Speech API (window.speechSynthesis).
+   Nothing is proxied through our server: zero TTS bandwidth / CPU / memory on the VM.
+
+   What this module does:
+   • Waits for the (asynchronously populated) voice list and keeps it fresh.
+   • Ranks voices so the best one is picked automatically – Google's offline/network
+     voices on Android/Chrome ("Google हिन्दी", "Google US English", Chrome's
+     "Natural"/"Online" voices), Apple's premium voices, Microsoft "Natural" voices …
+   • Groups the voices for the picker: Hindi · English (India/US/UK/AU) · other Indian
+     languages, each tagged ♀/♂ where the engine exposes a gender hint.
+   • pick(prefName, lang, gender) → best SpeechSynthesisVoice for the request.
    ========================================================= */
 (function () {
-  // [id, label, flag/lang, gender]  – grouped for the voice picker
-  const EDGE_VOICES = [
-    { group: "हिन्दी · Hindi", voices: [
-      ["hi-IN-SwaraNeural", "Swara", "♀"], ["hi-IN-MadhurNeural", "Madhur", "♂"],
-      ["en-US-AvaMultilingualNeural", "Ava · multilingual", "♀"], ["en-US-AndrewMultilingualNeural", "Andrew · multilingual", "♂"],
-      ["en-US-EmmaMultilingualNeural", "Emma · multilingual", "♀"], ["en-US-BrianMultilingualNeural", "Brian · multilingual", "♂"]
-    ] },
-    { group: "English · India", voices: [["en-IN-NeerjaNeural", "Neerja", "♀"], ["en-IN-NeerjaExpressiveNeural", "Neerja · expressive", "♀"], ["en-IN-PrabhatNeural", "Prabhat", "♂"]] },
-    { group: "English · US", voices: [
-      ["en-US-AriaNeural", "Aria · novel", "♀"], ["en-US-JennyNeural", "Jenny", "♀"], ["en-US-MichelleNeural", "Michelle", "♀"], ["en-US-AnaNeural", "Ana · young", "♀"],
-      ["en-US-GuyNeural", "Guy · novel", "♂"], ["en-US-ChristopherNeural", "Christopher", "♂"], ["en-US-EricNeural", "Eric", "♂"], ["en-US-RogerNeural", "Roger", "♂"], ["en-US-SteffanNeural", "Steffan", "♂"]
-    ] },
-    { group: "English · UK / AU", voices: [["en-GB-SoniaNeural", "Sonia", "♀"], ["en-GB-LibbyNeural", "Libby", "♀"], ["en-GB-MaisieNeural", "Maisie · young", "♀"], ["en-GB-RyanNeural", "Ryan", "♂"], ["en-GB-ThomasNeural", "Thomas", "♂"], ["en-AU-NatashaNeural", "Natasha", "♀"], ["en-AU-WilliamMultilingualNeural", "William", "♂"]] },
-    { group: "भारतीय भाषाएँ · Indian languages", voices: [
-      ["mr-IN-AarohiNeural", "Aarohi · मराठी", "♀"], ["mr-IN-ManoharNeural", "Manohar · मराठी", "♂"],
-      ["bn-IN-TanishaaNeural", "Tanishaa · বাংলা", "♀"], ["bn-IN-BashkarNeural", "Bashkar · বাংলা", "♂"],
-      ["ta-IN-PallaviNeural", "Pallavi · தமிழ்", "♀"], ["ta-IN-ValluvarNeural", "Valluvar · தமிழ்", "♂"],
-      ["te-IN-ShrutiNeural", "Shruti · తెలుగు", "♀"], ["te-IN-MohanNeural", "Mohan · తెలుగు", "♂"],
-      ["gu-IN-DhwaniNeural", "Dhwani · ગુજરાતી", "♀"], ["gu-IN-NiranjanNeural", "Niranjan · ગુજરાતી", "♂"],
-      ["kn-IN-SapnaNeural", "Sapna · ಕನ್ನಡ", "♀"], ["kn-IN-GaganNeural", "Gagan · ಕನ್ನಡ", "♂"],
-      ["ml-IN-SobhanaNeural", "Sobhana · മലയാളം", "♀"], ["ml-IN-MidhunNeural", "Midhun · മലയാളം", "♂"],
-      ["ur-IN-GulNeural", "Gul · اردو", "♀"], ["ur-IN-SalmanNeural", "Salman · اردو", "♂"]
-    ] }
-  ];
-  const GOOGLE_LANGS = [
-    { group: "हिन्दी · Hindi", voices: [["hi", "Hindi · हिन्दी (Google)", "♀"]] },
-    // Google Translate ships only one (female) Hindi voice – male options are relayed through the neural engine.
-    { group: "हिन्दी · Male voices", voices: [["edge:hi-IN-MadhurNeural", "Madhur · पुरुष", "♂"], ["edge:en-US-AndrewMultilingualNeural", "Andrew · multilingual", "♂"], ["edge:en-US-BrianMultilingualNeural", "Brian · multilingual", "♂"], ["edge:en-IN-PrabhatNeural", "Prabhat · Indian English", "♂"]] },
-    { group: "English", voices: [["en-IN", "English · India", ""], ["en", "English · US", ""], ["en-GB", "English · UK", ""], ["en-AU", "English · Australia", ""]] },
-    { group: "भारतीय भाषाएँ · Indian languages", voices: [["mr", "Marathi · मराठी", ""], ["bn", "Bengali · বাংলা", ""], ["ta", "Tamil · தமிழ்", ""], ["te", "Telugu · తెలుగు", ""], ["gu", "Gujarati · ગુજરાતી", ""], ["kn", "Kannada · ಕನ್ನಡ", ""], ["ml", "Malayalam · മലയാളം", ""], ["pa", "Punjabi · ਪੰਜਾਬੀ", ""], ["ur", "Urdu · اردو", ""], ["ne", "Nepali · नेपाली", ""]] }
-  ];
-  const flat = groups => groups.flatMap(g => g.voices);
-  const has = (groups, id) => flat(groups).some(v => v[0] === id);
-  const label = (groups, id) => { const v = flat(groups).find(v => v[0] === id); return v ? v[1] : id; };
+  const synth = typeof window !== "undefined" ? window.speechSynthesis : null;
+  const supported = !!(synth && typeof SpeechSynthesisUtterance !== "undefined");
 
-  /* ---- Edge neural via server relay → Blob URL (mp3) ---- */
-  // POST body, not GET query: a Hindi paragraph grows ~9× under encodeURIComponent and blew past
-  // Node's ~16 KB header limit (431). The server caps text at 1500 chars either way.
-  async function edge(text, voice, rate, signal, pitch) {
-    const r = await fetch("/api/tts", { method: "POST", signal, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ voice, rate: rate || 1, pitch: pitch || 0, text }) });
-    if (!r.ok) { let m = `HTTP ${r.status}`; try { m = (await r.json()).error || m; } catch { } throw new Error(m); }
-    const b = await r.blob();
-    if (!b.size) throw new Error("Edge voice returned no audio");
-    return URL.createObjectURL(b);
-  }
-  // Server truncates at 1500 chars – very long paragraphs are split at sentence ends and played as a queue.
-  const EDGE_MAX = 1400;
-  async function edgeAll(text, voice, rate, signal, pitch) {
-    const parts = text.length <= EDGE_MAX ? [text] : splitGoogle(text, EDGE_MAX);
-    const out = []; for (const p of parts) out.push(await edge(p, voice, rate, signal, pitch)); // sequential: keeps server load bounded
-    return out;
+  // Languages we surface in the picker (readers are Hindi / Indian-English first).
+  const LANG_RE = /^(hi|en|mr|bn|ta|te|gu|kn|ml|pa|ur|ne)\b/i;
+  const LANG_NAME = { hi: "हिन्दी · Hindi", en: "English", mr: "मराठी · Marathi", bn: "বাংলা · Bengali", ta: "தமிழ் · Tamil", te: "తెలుగు · Telugu", gu: "ગુજરાતી · Gujarati", kn: "ಕನ್ನಡ · Kannada", ml: "മലയാളം · Malayalam", pa: "ਪੰਜਾਬੀ · Punjabi", ur: "اردو · Urdu", ne: "नेपाली · Nepali" };
+  const REGION = { IN: "India", US: "US", GB: "UK", AU: "Australia", CA: "Canada", IE: "Ireland", NZ: "New Zealand", ZA: "South Africa", PK: "Pakistan", BD: "Bangladesh", LK: "Sri Lanka", NP: "Nepal" };
+
+  // Gender hints: engines rarely expose it, so we infer from well-known voice names.
+  const FEMALE = /\b(female|woman|girl|swara|neerja|ananya|kajal|aarohi|tanishaa|pallavi|shruti|dhwani|sapna|sobhana|gul|ava|aria|jenny|emma|michelle|ana|sonia|libby|maisie|natasha|samantha|karen|moira|tessa|fiona|veena|lekha|zira|heera|kalpana|hazel|susan|catherine|zoe|allison|nicky|victoria|kate|serena|siri female|f\d?)\b/i;
+  const MALE = /\b(male|man|boy|madhur|prabhat|arjun|rehaan|manohar|bashkar|valluvar|mohan|niranjan|gagan|midhun|salman|andrew|brian|guy|christopher|eric|roger|steffan|ryan|thomas|william|daniel|alex|fred|tom|rishi|ravi|hemant|david|mark|james|george|oliver|aaron|arthur|gordon|lee|m\d?)\b/i;
+  const gender = v => (FEMALE.test(v.name) ? "♀" : MALE.test(v.name) ? "♂" : "");
+
+  /* ---------- quality ranking ----------
+     Higher = better. Google's Android voices + Chrome's "Natural"/"Online" voices sound far
+     better than legacy eSpeak/Pico, and offline/local voices never stall on bad networks. */
+  function score(v, wantLang) {
+    let s = 0;
+    const n = v.name || "", l = (v.lang || "").replace("_", "-");
+    if (/google/i.test(n)) s += 50;                                   // Google TTS (Android / Chrome)
+    if (/natural|neural|online|premium|enhanced|wavenet|journey|studio/i.test(n)) s += 40; // Edge/Chrome natural, Apple premium
+    if (/microsoft/i.test(n) && /natural|online/i.test(n)) s += 10;
+    if (/siri|apple/i.test(n) || /com\.apple\.(voice|ttsbundle)/.test(v.voiceURI || "")) s += 25;
+    if (/espeak|pico|festival|compact|default|android tts/i.test(n)) s -= 40;   // robotic legacy engines
+    if (v.localService) s += 8;                                       // works offline / no cold start
+    if (v.default) s += 2;
+    if (wantLang) {
+      if (l.toLowerCase() === wantLang.toLowerCase()) s += 30;        // exact (hi-IN)
+      else if (l.slice(0, 2).toLowerCase() === wantLang.slice(0, 2).toLowerCase()) s += 15; // same language
+      if (/^en/i.test(wantLang) && /-IN$/i.test(l)) s += 5;          // Indian-English accent preferred for en
+    }
+    return s;
   }
 
-  /* ---- Google Translate TTS (gTTS) → list of ≤200-char URLs ---- */
-  function splitGoogle(text, max = 190) {
+  /* ---------- voice list (async on Chrome/Android) ---------- */
+  let voices = [], readyRes, ready = new Promise(r => (readyRes = r));
+  function refresh() {
+    if (!supported) { readyRes([]); return []; }
+    const all = synth.getVoices() || [];
+    if (all.length) { voices = all.filter(v => LANG_RE.test(v.lang || "")); if (!voices.length) voices = all; readyRes(voices); }
+    return voices;
+  }
+  if (supported) {
+    refresh();
+    synth.addEventListener ? synth.addEventListener("voiceschanged", () => { refresh(); listeners.forEach(f => { try { f(voices); } catch { } }); }) : (synth.onvoiceschanged = refresh);
+    // Some Android WebViews never fire voiceschanged – poll briefly as a fallback.
+    let tries = 0; const t = setInterval(() => { if (refresh().length || ++tries > 20) clearInterval(t); }, 250);
+    setTimeout(() => readyRes(voices), 3000); // never block the UI forever
+  }
+  const listeners = new Set();
+  const onChange = f => { listeners.add(f); return () => listeners.delete(f); };
+
+  /* ---------- grouping for the picker ---------- */
+  const niceName = v => String(v.name || "").replace(/^(Google|Microsoft|Apple)\s+/i, "").replace(/\s*\((?:[^()]*\bvoice\b[^()]*|Natural|Online|Enhanced|Premium)\)/gi, "").replace(/\s+-\s+.*$/, "").trim() || v.lang;
+  const regionOf = v => { const m = /^[a-z]{2}[-_]([A-Za-z]{2})/.exec(v.lang || ""); return m ? (REGION[m[1].toUpperCase()] || m[1].toUpperCase()) : ""; };
+  const isHQ = v => /google|natural|neural|online|premium|enhanced|wavenet|siri/i.test(v.name || "") || /com\.apple\.(voice|ttsbundle)/.test(v.voiceURI || "");
+  /* → [{ group, voices: [[id, label, gender, voice]] }] – same shape the old picker consumed */
+  function groups() {
+    const vs = voices.length ? voices : refresh();
+    const byKey = {};
+    for (const v of vs) {
+      const lang = (v.lang || "").slice(0, 2).toLowerCase();
+      let key = LANG_NAME[lang] || v.lang;
+      if (lang === "en") key = "English · " + (regionOf(v) || "Other");
+      (byKey[key] = byKey[key] || []).push(v);
+    }
+    const order = k => /Hindi/.test(k) ? 0 : /English · India/.test(k) ? 1 : /English · US/.test(k) ? 2 : /English/.test(k) ? 3 : 4;
+    return Object.keys(byKey).sort((a, b) => order(a) - order(b) || a.localeCompare(b)).map(k => ({
+      group: k,
+      voices: byKey[k].sort((a, b) => score(b) - score(a) || a.name.localeCompare(b.name))
+        .map(v => [v.name, `${niceName(v)}${isHQ(v) ? " · HD" : ""}${v.localService ? "" : " · online"}`, gender(v), v])
+    }));
+  }
+  const flat = gs => (gs || groups()).flatMap(g => g.voices);
+  const has = (gs, id) => flat(gs).some(v => v[0] === id);
+  const label = (gs, id) => { const v = flat(gs).find(v => v[0] === id); return v ? v[1] : id; };
+
+  /* ---------- automatic selection ----------
+     pick(name, lang, gender): exact saved voice → best voice for lang (+gender) → best Hindi → best English → anything. */
+  function pick(name, lang, g) {
+    const vs = voices.length ? voices : refresh();
+    if (!vs.length) return null;
+    if (name) { const v = vs.find(v => v.name === name || v.voiceURI === name); if (v) return v; }
+    const rank = (want, gen) => vs.map(v => [v, score(v, want) + (gen && gender(v) === gen ? 20 : 0)]).sort((a, b) => b[1] - a[1]);
+    const sameLang = want => vs.filter(v => (v.lang || "").slice(0, 2).toLowerCase() === want.slice(0, 2).toLowerCase());
+    if (lang && sameLang(lang).length) return rank(lang, g)[0][0];
+    if (sameLang("hi").length) return rank("hi-IN", g)[0][0];
+    if (sameLang("en").length) return rank("en-IN", g)[0][0];
+    return rank(lang || "en", g)[0][0];
+  }
+  /* Best voice for a paragraph: Devanagari → Hindi voice, otherwise the preferred/English voice. */
+  const detectLang = t => /[\u0900-\u097F]/.test(t) ? "hi-IN" : /[\u0980-\u09FF]/.test(t) ? "bn-IN" : /[\u0A00-\u0A7F]/.test(t) ? "pa-IN" : /[\u0A80-\u0AFF]/.test(t) ? "gu-IN" : /[\u0B80-\u0BFF]/.test(t) ? "ta-IN" : /[\u0C00-\u0C7F]/.test(t) ? "te-IN" : /[\u0C80-\u0CFF]/.test(t) ? "kn-IN" : /[\u0D00-\u0D7F]/.test(t) ? "ml-IN" : /[\u0600-\u06FF]/.test(t) ? "ur-IN" : "en-IN";
+
+  /* ---------- utterance factory ----------
+     Chrome stops speaking long utterances (~15 s bug) – callers pass one paragraph at a time;
+     we additionally split >240-char paragraphs at sentence boundaries. */
+  function split(text, max = 240) {
     const out = []; let cur = "";
-    for (const s of text.replace(/\s+/g, " ").trim().split(/(?<=[.!?;:।])\s+/)) {
+    for (const s of String(text || "").replace(/\s+/g, " ").trim().split(/(?<=[.!?;।])\s+/)) {
       if ((cur + " " + s).trim().length <= max) { cur = (cur + " " + s).trim(); continue; }
       if (cur) out.push(cur); cur = "";
       if (s.length <= max) { cur = s; continue; }
@@ -73,26 +120,41 @@
     if (cur) out.push(cur);
     return out;
   }
-  // Google returns 404 when a foreign Referer is sent → switch the document to no-referrer.
-  function noReferrer() {
-    if (document.querySelector('meta[name="referrer"]')) return;
-    const m = document.createElement("meta"); m.name = "referrer"; m.content = "no-referrer"; document.head.appendChild(m);
+  function utter(text, voice, rate, pitch) {
+    const u = new SpeechSynthesisUtterance(text);
+    if (voice) { u.voice = voice; u.lang = voice.lang; } else u.lang = detectLang(text);
+    u.rate = Math.max(0.5, Math.min(2, +rate || 1));
+    u.pitch = Math.max(0, Math.min(2, 1 + (+pitch || 0) / 50)); // our −50…+50 % → WebSpeech 0…2
+    u.volume = 1;
+    return u;
   }
-  function google(text, lang) {
-    noReferrer();
-    const parts = splitGoogle(text);
-    return parts.map((p, i) => `https://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob&tl=${encodeURIComponent(lang || "en")}&total=${parts.length}&idx=${i}&textlen=${p.length}&q=${encodeURIComponent(p)}`);
+  /* speak(text, opts) → Promise resolves on end, rejects on error. Splits long text, keeps one
+     queue, and nudges Chrome (pause/resume) so it never goes silent mid-paragraph. */
+  function speak(text, opts) {
+    opts = opts || {};
+    return new Promise((res, rej) => {
+      if (!supported) return rej(new Error("Speech synthesis not supported in this browser"));
+      const parts = split(text); if (!parts.length) return res();
+      let i = 0, dead = false;
+      const voice = opts.voice || pick(opts.voiceName, opts.lang || detectLang(text), opts.gender);
+      const next = () => {
+        if (dead) return;
+        if (i >= parts.length) { clearInterval(keep); return res(); }
+        const u = utter(parts[i++], voice, opts.rate, opts.pitch);
+        if (opts.onboundary) u.onboundary = opts.onboundary;
+        u.onend = next;
+        u.onerror = e => { if (e.error === "interrupted" || e.error === "canceled") { dead = true; clearInterval(keep); return res(); } dead = true; clearInterval(keep); rej(new Error(e.error || "speech error")); };
+        synth.speak(u);
+      };
+      // Chrome desktop stops after ~15 s of continuous speech unless nudged.
+      const keep = setInterval(() => { if (synth.speaking && !synth.paused && /Chrome/.test(navigator.userAgent) && !/Android|Mobile/.test(navigator.userAgent)) { synth.pause(); synth.resume(); } }, 10000);
+      if (opts.signal) opts.signal.addEventListener("abort", () => { dead = true; clearInterval(keep); synth.cancel(); res(); }, { once: true });
+      next();
+    });
   }
+  const cancel = () => { if (supported) synth.cancel(); };
+  const pause = () => { if (supported) synth.pause(); };
+  const resume = () => { if (supported) synth.resume(); };
 
-  /* synthesize → Promise<string[]> (audio URLs to play in order) */
-  async function synthesize(engine, text, voice, rate, signal, pitch) {
-    if (engine === "edge") return edgeAll(text, voice, rate, signal, pitch);
-    if (engine === "google") {
-      if (/^edge:/.test(voice)) return edgeAll(text, voice.slice(5), rate, signal, pitch); // male Hindi via neural relay
-      return google(text, voice);
-    }
-    throw new Error("unknown engine");
-  }
-
-  window.NXTTS = { EDGE_VOICES, GOOGLE_LANGS, flat, has, label, synthesize, edge, google };
+  window.NXTTS = { supported, ready, voices: () => (voices.length ? voices : refresh()), refresh, onChange, groups, flat, has, label, pick, gender, detectLang, split, utter, speak, cancel, pause, resume, score };
 })();
