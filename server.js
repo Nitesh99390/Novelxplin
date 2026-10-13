@@ -243,12 +243,23 @@ async function requireOwner(req) {
    TRUST_PROXY=1 -> take client IP from CF-Connecting-IP / X-Forwarded-For (only when behind Cloudflare/nginx). */
 const NX_SECRET = process.env.NX_SECRET || crypto.randomBytes(32).toString("hex");
 const TRUST_PROXY = /^(1|true|yes)$/i.test(process.env.TRUST_PROXY || "");
+// Cloudflare always sets CF-Connecting-IP when it fronts the origin. Trust it automatically
+// (TRUST_CF=0 to disable): without this every visitor shares the Cloudflare edge IP, so the
+// per-IP chapter limit + 1 h block hit ALL readers at once and the page token (bound to the
+// edge /24, which changes between requests) fails -> chapters 403 while the rest of the site works.
+const TRUST_CF = !/^(0|false|no)$/i.test(process.env.TRUST_CF || "");
+let cfSeen = false;
 const CH_MIN = +process.env.CHAPTER_LIMIT_MIN || 40, CH_HOUR = +process.env.CHAPTER_LIMIT_HOUR || 500;
 const TOKEN_WINDOW = 2 * 60 * 60 * 1000; // token lifetime
 const BAD_UA = /python|curl|wget|axios|node-fetch|undici|go-http-client|okhttp|java\/|libwww|httpx|aiohttp|scrapy|requests|postman|insomnia|headless|phantom|puppeteer|playwright|selenium|http\.rb|guzzle|restsharp|powershell|dart:io|cfnetwork(?!.*safari)/i;
 function clientIp(req) {
+  const cf = req.headers["cf-connecting-ip"];
+  if (TRUST_CF && cf && String(cf).trim()) {
+    if (!cfSeen) { cfSeen = true; console.log("[guard] Cloudflare detected - using CF-Connecting-IP as client IP"); }
+    return String(cf).trim();
+  }
   if (TRUST_PROXY) {
-    const h = req.headers["cf-connecting-ip"] || req.headers["x-real-ip"] || (req.headers["x-forwarded-for"] || "").split(",")[0];
+    const h = req.headers["x-real-ip"] || (req.headers["x-forwarded-for"] || "").split(",")[0];
     if (h && h.trim()) return h.trim();
   }
   return (req.socket && req.socket.remoteAddress) || "0.0.0.0";

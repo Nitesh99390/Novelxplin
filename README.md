@@ -53,7 +53,8 @@ Chapter text is the whole product, so `GET /api/novels/:slug/chapters/:num` is g
 | **Pseudonymous watermark** – every served chapter carries `wm = HMAC(uid, WM_SECRET)` (16 chars) as invisible zero-width Unicode runs inside several paragraphs (positions derived from the id) and as DOM metadata (`<meta name="nx-wm">`, `#content[data-wm]`, hidden `.wm` span). Owner-only `POST /api/watermark {text}` decodes a leaked paragraph; `{uid}` gives an account's id. | Tracing a leaked dump back to the exact account |
 
 Env knobs: `WM_SECRET` (watermark key; falls back to `NX_SECRET` – set it so ids are stable across restarts), `CHAPTER_QUOTA_DAY`, `CHAPTER_QUOTA_WINDOW_H`, `NX_SECRET` (HMAC key; random per boot if unset – set it so tokens survive restarts, e.g. `openssl rand -hex 32`),
-`TRUST_PROXY=1` (**only** when behind Cloudflare/nginx – takes the client IP from `CF-Connecting-IP` / `X-Forwarded-For`; without it all users would share the proxy IP and hit the limit together),
+`TRUST_CF` (default **on**: when Cloudflare fronts the origin, `CF-Connecting-IP` is used automatically as the client IP – otherwise every reader shares the Cloudflare edge IP, the per-IP limit blocks everyone and the page token fails → chapters 403; set `TRUST_CF=0` to disable),
+`TRUST_PROXY=1` (**only** when behind nginx/another proxy that sets `X-Real-IP`/`X-Forwarded-For` – takes the client IP from `CF-Connecting-IP` / `X-Forwarded-For`; without it all users would share the proxy IP and hit the limit together),
 `CHAPTER_LIMIT_MIN`, `CHAPTER_LIMIT_HOUR`.
 If a token expires on a long-open tab, `js/data.js` silently re-reads the page to fetch a fresh one – readers never see it.
 
