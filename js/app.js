@@ -5,7 +5,60 @@
   const $ = (s, el) => (el || document).querySelector(s);
   const $$ = (s, el) => Array.from((el || document).querySelectorAll(s));
   const esc = s => String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+  /* ---------- Clean URL routing ----------
+     server.js serves the same static HTML for pretty paths; here we parse the
+     path back into the parameters pages expect (n, c, g, sort, q, status, page)
+     and merge them into `q` so `q.get("n")` keeps working everywhere.
+       /                              → index
+       /novel/<slug>[/page/2]         → novel.html   (n, page)
+       /novel/<slug>/chapter-<c>      → read.html    (n, c)
+       /genre/<genre-slug>[/ongoing|/completed][/page/2]
+       /latest-novels | /latest-release | /most-popular | /completed-novels [/status][/page/N]
+       /search/<term>[/page/2]        → search.html  (q)
+       /library · /finder · /admin[/<slug>]
+     Legacy *.html?x= URLs are 301-redirected by the server, but we still parse
+     their query string so nothing breaks if the page is opened directly. */
+  const LIST_PATHS = { "latest-novel": "latest-novels", "latest-release": "latest-release", "most-popular": "most-popular", "completed": "completed-novels" };
+  const PATH_SORTS = Object.fromEntries(Object.entries(LIST_PATHS).map(([k, v]) => [v, k]));
+  const slugify = s => String(s).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+  const dec = s => { try { return decodeURIComponent(s); } catch { return s; } };
+  function parseRoute(pathname) {
+    const seg = pathname.split("/").filter(Boolean).map(dec);
+    const r = { page: "index", params: {} };
+    if (seg.length >= 2 && seg[seg.length - 2] === "page" && /^\d+$/.test(seg[seg.length - 1])) { r.params.page = seg.pop(); seg.pop(); }
+    const [a, b, c] = seg;
+    if (!a) return r;
+    const status = s => s && /^(ongoing|completed)$/.test(s) ? (r.params.status = s) : null;
+    if (a === "novel" && b) {
+      r.params.n = b;
+      const m = c && /^chapter-(\d+)$/.exec(c);
+      if (m) { r.page = "read"; r.params.c = m[1]; } else r.page = "novel";
+    } else if (a === "genre" && b) { r.page = "genre"; r.params.g = b; status(c); }
+    else if (PATH_SORTS[a]) { r.page = "list"; r.params.sort = PATH_SORTS[a]; status(b); }
+    else if (a === "search") { r.page = "search"; if (b) r.params.q = b; }
+    else if (a === "library" || a === "finder") r.page = a;
+    else if (a === "admin") { r.page = "admin"; if (b) r.params.n = b; }
+    else if (/\.html$/i.test(a)) r.page = a.replace(/\.html$/i, "");
+    else r.page = "404";
+    return r;
+  }
+  const route = parseRoute(location.pathname);
   const q = new URLSearchParams(location.search);
+  for (const [k, v] of Object.entries(route.params)) if (!q.has(k)) q.set(k, v);
+  const pg = p => p && +p > 1 ? `/page/${+p}` : "";
+  const st = s => s && s !== "all" ? `/${s}` : "";
+  const U = {
+    home: "/", library: "/library", finder: "/finder",
+    admin: slug => slug ? `/admin/${encodeURIComponent(slug)}` : "/admin",
+    novel: (slug, page) => `/novel/${encodeURIComponent(slug)}${pg(page)}`,
+    chapter: (slug, c) => `/novel/${encodeURIComponent(slug)}/chapter-${+c || 1}`,
+    genre: (g, status, page) => `/genre/${slugify(g)}${st(status)}${pg(page)}`,
+    list: (sort, status, page) => `/${LIST_PATHS[sort] || "latest-novels"}${st(status)}${pg(page)}`,
+    search: (term, status, page) => `/search${term ? "/" + encodeURIComponent(String(term).trim()) : ""}${st(status)}${pg(page)}`,
+    slugify,
+  };
+  window.U = U; window.ROUTE = route;
 
   /* ---------- SVG icons ---------- */
   const I = {
@@ -120,37 +173,37 @@
 
   /* ---------- Header ---------- */
   function genreLinks(cls) {
-    return DB.GENRES.map(g => `<a href="genre.html?g=${encodeURIComponent(g)}" class="${cls || ""}">${esc(g)}</a>`).join("");
+    return DB.GENRES.map(g => `<a href="${U.genre(g)}" class="${cls || ""}">${esc(g)}</a>`).join("");
   }
   function header() {
     const user = Auth.user();
     const userHtml = user
-      ? `<a class="login-btn user-pill" href="library.html" title="${esc(user.email)}">${user.photo ? `<img class="avatar" src="${esc(user.photo)}" alt="" referrerpolicy="no-referrer">` : `<span class="avatar">${esc(user.name[0])}</span>`}<span class="name">${esc(user.name)}</span></a>${user.admin ? `<a class="login-btn admin-btn" href="admin.html" title="Admin panel">${I.pen} Admin</a>` : ""}`
+      ? `<a class="login-btn user-pill" href="${U.library}" title="${esc(user.email)}">${user.photo ? `<img class="avatar" src="${esc(user.photo)}" alt="" referrerpolicy="no-referrer">` : `<span class="avatar">${esc(user.name[0])}</span>`}<span class="name">${esc(user.name)}</span></a>${user.admin ? `<a class="login-btn admin-btn" href="${U.admin()}" title="Admin panel">${I.pen} Admin</a>` : ""}`
       : `<button class="login-btn" id="loginBtn">${I.user} Login/Signup</button>`;
     return `
     <header class="header">
       <div class="wrap">
-        <a class="logo" href="index.html"><span class="logo-badge">N</span><span class="logo-text"><span><span class="n">Novel</span>xplin</span></span></a>
+        <a class="logo" href="${U.home}"><span class="logo-badge">N</span><span class="logo-text"><span><span class="n">Novel</span>xplin</span></span></a>
         <ul class="main-nav">
           <li><a href="#" data-dd>Novel list <span class="caret"></span></a>
             <div class="dropdown">
-              <a href="library.html">Your Library</a>
-              <a href="list.html?sort=latest-novel">Latest Novels</a>
-              <a href="list.html?sort=latest-release">Latest Release</a>
-              <a href="list.html?sort=most-popular">Most Popular</a>
-              <a href="list.html?sort=completed">Completed Novels</a>
-              <a href="finder.html">Novel Finder<span class="new">New</span></a>
+              <a href="${U.library}">Your Library</a>
+              <a href="${U.list("latest-novel")}">Latest Novels</a>
+              <a href="${U.list("latest-release")}">Latest Release</a>
+              <a href="${U.list("most-popular")}">Most Popular</a>
+              <a href="${U.list("completed")}">Completed Novels</a>
+              <a href="${U.finder}">Novel Finder<span class="new">New</span></a>
             </div>
           </li>
           <li><a href="#" data-dd>Genres <span class="caret"></span></a>
             <div class="dropdown genres">${genreLinks()}</div>
           </li>
-          <li><a class="nav-rocket" href="list.html?sort=most-popular" title="Hot novels">${I.rocket}</a></li>
+          <li><a class="nav-rocket" href="${U.list("most-popular")}" title="Hot novels">${I.rocket}</a></li>
         </ul>
         <div class="header-right">
           <a class="icon-btn" href="#" title="Mobile app" id="qrBtn">${I.qr}</a>
-          <a class="icon-btn" href="library.html" title="Your Library">${I.shelf}</a>
-          <form class="search-form" action="search.html" method="get" role="search">
+          <a class="icon-btn" href="${U.library}" title="Your Library">${I.shelf}</a>
+          <form class="search-form" action="/search" method="get" role="search">
             <input type="text" name="q" placeholder="Search novels" autocomplete="off" value="${esc(q.get("q") || "")}">
             <button type="submit" aria-label="Search">${I.search}</button>
           </form>
@@ -160,17 +213,17 @@
       </div>
       <nav class="mobile-nav" id="mobileNav">
         <div class="m-title">Novel list</div>
-        <a href="library.html">Your Library</a>
-        <a href="list.html?sort=latest-novel">Latest Novels</a>
-        <a href="list.html?sort=latest-release">Latest Release</a>
-        <a href="list.html?sort=most-popular">Most Popular</a>
-        <a href="list.html?sort=completed">Completed Novels</a>
-        <a href="finder.html">Novel Finder</a>
+        <a href="${U.library}">Your Library</a>
+        <a href="${U.list("latest-novel")}">Latest Novels</a>
+        <a href="${U.list("latest-release")}">Latest Release</a>
+        <a href="${U.list("most-popular")}">Most Popular</a>
+        <a href="${U.list("completed")}">Completed Novels</a>
+        <a href="${U.finder}">Novel Finder</a>
         <div class="m-title">Genres</div>
         <div class="m-genres">${genreLinks()}</div>
       </nav>
       <div class="mobile-search">
-        <form class="search-form" action="search.html" method="get" role="search">
+        <form class="search-form" action="/search" method="get" role="search">
           <input type="text" name="q" placeholder="Search novels" value="${esc(q.get("q") || "")}">
           <button type="submit" aria-label="Search">${I.search}</button>
         </form>
@@ -185,7 +238,7 @@
       <div class="wrap">
         <div class="brand">Novelxplin</div>
         <div>Read Web Novels Online &mdash; your library &amp; history sync across devices.</div>
-        <div class="links"><a href="#">Contact</a><a href="#">Sitemap</a></div>
+        <div class="links"><a href="#">Contact</a><a href="/sitemap.xml">Sitemap</a></div>
         <div class="links"><a href="#">Privacy Policy &amp; Terms of use</a></div>
         <div class="copy">&copy; ${new Date().getFullYear()} Novelxplin. All rights reserved.</div>
       </div>
@@ -211,7 +264,7 @@
   function cover(n, extra) {
     const full = n.status === "Completed" && extra && extra.fullRibbon ? " full-badge" : "";
     const img = n.cover ? `<img src="${esc(n.cover)}" alt="" loading="lazy">` : "";
-    return `<a class="cover${full}${n.cover ? " has-img" : ""}" href="novel.html?n=${n.slug}" style="background:${n.color}">${img}<span class="glyph">${n.glyph}</span><span class="cover-title">${esc(n.title)}</span></a>`;
+    return `<a class="cover${full}${n.cover ? " has-img" : ""}" href="${U.novel(n.slug)}" style="background:${n.color}">${img}<span class="glyph">${n.glyph}</span><span class="cover-title">${esc(n.title)}</span></a>`;
   }
   function stars(r) {
     const pct = Math.max(0, Math.min(100, (r / 5) * 100));
@@ -219,31 +272,31 @@
     return `<span class="stars"><b>${r.toFixed(1)}</b><span class="star-row">${s}<span class="fill" style="width:${pct}%">${s}</span></span></span>`;
   }
   function metaLines(n, opts) {
-    const g = n.genres.slice(0, 2).map(x => `<a href="genre.html?g=${encodeURIComponent(x)}">${esc(x)}</a>`).join(", ");
+    const g = n.genres.slice(0, 2).map(x => `<a href="${U.genre(x)}">${esc(x)}</a>`).join(", ");
     const full = (opts && opts.showFull && n.status === "Completed") ? `<span class="chip full">Full</span>` : "";
     return `<div class="meta">${I.globe} <span>${esc(n.lang)}</span></div>
       <div class="meta">${I.list} <span>${g}</span></div>
       <div>${full}<span class="chip">${n.chapters} Chapters</span></div>`;
   }
   function nCard(n, opts) {
-    return `<div class="n-card">${cover(n, opts)}<div><h3 class="truncate"><a href="novel.html?n=${n.slug}">${esc(n.title)}</a>${n.hot ? '<span class="badge-hot">HOT</span>' : ""}</h3>${stars(n.rating)}${metaLines(n, opts)}</div></div>`;
+    return `<div class="n-card">${cover(n, opts)}<div><h3 class="truncate"><a href="${U.novel(n.slug)}">${esc(n.title)}</a>${n.hot ? '<span class="badge-hot">HOT</span>' : ""}</h3>${stars(n.rating)}${metaLines(n, opts)}</div></div>`;
   }
   function releaseRow(n) {
     const ch = n.chapters;
     const ct = DB.chapterTitle(n, ch).replace(/^Chapter\s*\d+\s*[:\-]?\s*/i, "") || String(ch);
     return `<li>
       ${cover(n)}
-      <div class="title truncate"><a href="novel.html?n=${n.slug}">${esc(n.title)}</a>${n.hot ? '<span class="badge-hot">HOT</span>' : ""}${n.isNew ? '<span class="badge-new">NEW</span>' : ""}</div>
+      <div class="title truncate"><a href="${U.novel(n.slug)}">${esc(n.title)}</a>${n.hot ? '<span class="badge-hot">HOT</span>' : ""}${n.isNew ? '<span class="badge-new">NEW</span>' : ""}</div>
       <div class="genres truncate">${n.genres.slice(0, 2).map(esc).join(", ")}</div>
-      <a class="chap truncate" href="read.html?n=${n.slug}&c=${ch}" title="${esc(DB.chapterTitle(n, ch))}">Ch. ${ch}${ct !== String(ch) ? ": " + esc(ct) : ""}</a>
+      <a class="chap truncate" href="${U.chapter(n.slug, ch)}" title="${esc(DB.chapterTitle(n, ch))}">Ch. ${ch}${ct !== String(ch) ? ": " + esc(ct) : ""}</a>
       <div class="time">${DB.timeAgo(n.updatedMinutesAgo)}</div>
     </li>`;
   }
   function rankList(list) {
-    return `<ul class="rank-list">${list.map((n, i) => `<li><div class="num">${i + 1}</div>${cover(n)}<div><div class="t truncate"><a href="novel.html?n=${n.slug}">${esc(n.title)}</a></div><div class="s">${stars(n.rating)}</div><div class="s truncate">${n.genres.slice(0, 2).map(esc).join(", ")} &middot; ${n.chapters} ch</div></div></li>`).join("")}</ul>`;
+    return `<ul class="rank-list">${list.map((n, i) => `<li><div class="num">${i + 1}</div>${cover(n)}<div><div class="t truncate"><a href="${U.novel(n.slug)}">${esc(n.title)}</a></div><div class="s">${stars(n.rating)}</div><div class="s truncate">${n.genres.slice(0, 2).map(esc).join(", ")} &middot; ${n.chapters} ch</div></div></li>`).join("")}</ul>`;
   }
   function genreGrid() {
-    return `<div class="genre-grid">${DB.GENRES.map(g => `<a href="genre.html?g=${encodeURIComponent(g)}" class="${DB.GENRE_COLORS[g] || ""}">${I.dot} ${esc(g)}</a>`).join("")}</div>`;
+    return `<div class="genre-grid">${DB.GENRES.map(g => `<a href="${U.genre(g)}" class="${DB.GENRE_COLORS[g] || ""}">${I.dot} ${esc(g)}</a>`).join("")}</div>`;
   }
   function pagination(page, pages, mk) {
     if (pages <= 1) return "";
@@ -263,7 +316,7 @@
     return `<nav class="breadcrumb">${items.map((it, i) => (i ? '<span class="sep">›</span>' : "") + (it.href ? `<a href="${it.href}">${esc(it.label)}</a>` : `<span>${esc(it.label)}</span>`)).join("")}</nav>`;
   }
 
-  window.UI = { $, $$, esc, q, cover, stars, metaLines, nCard, releaseRow, rankList, genreGrid, pagination, panel, breadcrumb, header, footer, I };
+  window.UI = { $, $$, esc, q, U, route, cover, stars, metaLines, nCard, releaseRow, rankList, genreGrid, pagination, panel, breadcrumb, header, footer, I };
 
   /* ---------- Boot ---------- */
   document.addEventListener("DOMContentLoaded", async () => {
@@ -282,6 +335,12 @@
       li.addEventListener("mouseleave", () => li.classList.remove("open"));
     });
     document.addEventListener("click", e => { if (!e.target.closest(".main-nav")) $$(".main-nav > li.open").forEach(x => x.classList.remove("open")); });
+
+    // search forms → clean /search/<term> URL (server also accepts /search?q=)
+    $$("form.search-form").forEach(f => f.addEventListener("submit", e => {
+      const term = (f.querySelector("input[name=q]") || {}).value || "";
+      if (!term.trim()) return; e.preventDefault(); location.href = U.search(term);
+    }));
 
     // mobile
     const hb = $("#hamburger"); if (hb) hb.addEventListener("click", () => $("#mobileNav").classList.toggle("show"));

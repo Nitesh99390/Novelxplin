@@ -72,9 +72,14 @@
     return mo === 1 ? "a month ago" : `${mo} months ago`;
   }
   function slugify(s) { return String(s).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, ""); }
+  // "martial-arts" (clean URL) or "Martial Arts" (legacy ?g=) → canonical genre name
+  function genreName(g) {
+    const s = slugify(g);
+    return GENRES.find(x => slugify(x) === s) || [...new Set(novels.flatMap(n => n.genres))].find(x => slugify(x) === s) || String(g || "");
+  }
 
   window.DB = {
-    GENRES, GENRE_COLORS, LANGS, STATUS, PALETTE, GLYPHS, ready, api, slugify, timeAgo, chapterTitle,
+    GENRES, GENRE_COLORS, LANGS, STATUS, PALETTE, GLYPHS, ready, api, slugify, genreName, timeAgo, chapterTitle,
     get novels() { return novels; },
     get error() { return loadError; },
     get(slug) { return bySlug[slug] || null; },
@@ -87,7 +92,7 @@
     latestNovels(limit) { return [...novels].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)).slice(0, limit || novels.length); },
     mostPopular(limit) { return [...novels].sort((a, b) => b.views - a.views).slice(0, limit || novels.length); },
     completed(limit) { return novels.filter(n => n.status === "Completed").sort((a, b) => b.rating - a.rating).slice(0, limit || novels.length); },
-    byGenre(g) { return novels.filter(n => n.genres.map(x => x.toLowerCase()).includes(String(g).toLowerCase())); },
+    byGenre(g) { const s = slugify(g); return novels.filter(n => n.genres.some(x => slugify(x) === s)); },
     search(q) { q = String(q || "").trim().toLowerCase(); if (!q) return []; return novels.filter(n => n.title.toLowerCase().includes(q) || (n.author || "").toLowerCase().includes(q) || n.genres.join(" ").toLowerCase().includes(q)); },
     rankByRating(limit) { return [...novels].filter(n => n.rating > 0).sort((a, b) => b.rating - a.rating).slice(0, limit || 10); },
 
