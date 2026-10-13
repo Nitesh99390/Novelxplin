@@ -22,7 +22,7 @@ and can upload / edit / delete novels. Extra admins are stored in `data/admins.j
 |------|---------|
 | `index.html` | Home – featured, latest release, genres, top rated, latest/completed, continue reading |
 | `list.html` / `genre.html` / `search.html` / `finder.html` | Browse / filter |
-| `novel.html?n=<slug>` | Novel detail + chapter list (50/page, search) |
+| `novel.html?n=<slug>` | Novel detail + chapter list (50/page, search) + 1–5 star **user rating** (sign-in required) |
 | `read.html?n=<slug>&c=<n>` | Reader – themes, font, size, keyboard nav, comments (Firestore) |
 | `library.html` | Library + history (localStorage, synced to Firestore when signed in) |
 | `admin.html` | **Admin only** – create/edit/delete novels, cover upload, `.epub` chapter upload, backup |
@@ -130,6 +130,9 @@ GET    /api/novels                          catalog
 GET    /api/novels/:slug                    one novel
 GET    /api/novels/:slug/chapters           [{num,title,date}]
 GET    /api/novels/:slug/chapters/:n        {num,title,date,body:[paras]}
+GET    /api/novels/:slug/rating             {votes,rating,dist:[1★..5★],baseRating,shown,mine*}  (*mine when signed in)
+POST   /api/novels/:slug/rating    (user)   {rating:1-5} → rate / change your vote
+DELETE /api/novels/:slug/rating    (user)   remove your vote
 POST   /api/novels                 (admin)  create
 PUT    /api/novels/:slug           (admin)  update
 DELETE /api/novels/:slug           (admin)  delete novel + chapters
@@ -140,6 +143,13 @@ POST   /api/upload                 (admin)  raw image body → {url}
 GET    /api/backup                 (admin)  full export .json.gz
 GET    /api/health
 ```
+
+**User ratings**: any Google-signed-in reader can rate a novel 1–5 stars on `novel.html`
+(one vote per account, changeable/removable). Votes live in `data/ratings.json`
+(`{slug: {uid: {r, at}}}`, included in backups); `rating`/`votes` on each novel are the average
+and count of real votes. The admin panel's **Base rating** is only displayed until the first
+user vote arrives. `(user)` routes accept any valid Firebase ID token; `(admin)` routes
+additionally require an admin email.
 
 Admin requests send `Authorization: Bearer <Firebase ID token>`; the server verifies the
 RS256 signature against Google's public certs and checks the email against `ADMIN_EMAILS`
