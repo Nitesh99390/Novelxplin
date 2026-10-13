@@ -16,26 +16,17 @@ Google using that email automatically gets the **Admin** button in the header �
 and can upload / edit / delete novels. Extra admins are stored in `data/admins.json`
 (included in backups); only the owner can manage the list.
 
-## Pages & clean URLs
+## Pages
 
-Every page has a clean, SEO-friendly path. `server.js` maps the path to the static HTML file and
-injects a per-route `<title>`, meta description, canonical and Open Graph tags; `js/app.js` parses the
-path back into the parameters the page needs (`window.ROUTE`) and builds links with `UI.U.*` helpers.
-Old `*.html?x=` links are **301-redirected** to the clean form, so bookmarks and Google's index migrate on their own.
-
-| Clean URL | File | Purpose |
-|-----------|------|---------|
-| `/` | `index.html` | Home – featured, latest release, genres, top rated, latest/completed, continue reading |
-| `/latest-novels` · `/latest-release` · `/most-popular` · `/completed-novels` `[/ongoing\|/completed][/page/N]` | `list.html` | Sorted lists |
-| `/genre/<genre-slug>[/ongoing\|/completed][/page/N]` | `genre.html` | Browse by genre (e.g. `/genre/martial-arts`) |
-| `/search[/<term>][/page/N]` | `search.html` | Search results (`/search?q=term` also works → 302) |
-| `/finder` | `finder.html` | Multi-filter novel finder |
-| `/novel/<slug>[/page/N]` | `novel.html` | Novel detail + chapter list (50/page, search) + 1–5 star **user rating** (sign-in required) |
-| `/novel/<slug>/chapter-<N>` | `read.html` | Reader – themes, font, size, keyboard nav, comments (Firestore) |
-| `/library` | `library.html` | Library + history (localStorage, synced to Firestore when signed in) |
-| `/admin[/<slug>]` | `admin.html` | **Admin only** – create/edit/delete novels, cover upload, `.epub` chapter upload, backup |
-| *(anything else)* | `404.html` | Branded 404 page (HTTP 404, `noindex`) with popular novels + genres |
-| Telegram bot | – | **Admin only** – upload novels from your phone: photo → details → `.epub` (see §4) |
+| File | Purpose |
+|------|---------|
+| `index.html` | Home – featured, latest release, genres, top rated, latest/completed, continue reading |
+| `list.html` / `genre.html` / `search.html` / `finder.html` | Browse / filter |
+| `novel.html?n=<slug>` | Novel detail + chapter list (50/page, search) + 1–5 star **user rating** (sign-in required) |
+| `read.html?n=<slug>&c=<n>` | Reader – themes, font, size, keyboard nav, comments (Firestore) |
+| `library.html` | Library + history (localStorage, synced to Firestore when signed in) |
+| `admin.html` | **Admin only** – create/edit/delete novels, cover upload, `.epub` chapter upload, backup |
+| Telegram bot | **Admin only** – upload novels from your phone: photo → details → `.epub` (see §4) |
 
 ## 1. Firebase setup (5 min)
 
@@ -163,7 +154,7 @@ additionally require an admin email.
 Admin requests send `Authorization: Bearer <Firebase ID token>`; the server verifies the
 RS256 signature against Google's public certs and checks the email against `ADMIN_EMAILS`
 (owners) **or** `data/admins.json` (extra admins added from the panel).
-For local dev without Firebase: `ADMIN_DEV_TOKEN=dev node server.js` and open `/admin?dev=dev`.
+For local dev without Firebase: `ADMIN_DEV_TOKEN=dev node server.js` and open `admin.html?dev=dev`.
 
 ## SEO: robots.txt + sitemaps (Google Search Console)
 
@@ -171,11 +162,11 @@ For local dev without Firebase: `ADMIN_DEV_TOKEN=dev node server.js` and open `/
 
 | URL | Contents |
 |-----|----------|
-| `/robots.txt` | Allows crawling, blocks `/admin`, `/api/`, `/library`, `/search`, legacy `*.html?` URLs; points to `/sitemap.xml` |
+| `/robots.txt` | Allows crawling, blocks `/admin.html`, `/api/`, `/library.html`, search result pages; points to `/sitemap.xml` |
 | `/sitemap.xml` | **Sitemap index** – submit only this one in Search Console |
-| `/sitemap-pages.xml` | Home, list/sort pages, finder, and one URL per genre (`/genre/<slug>`) |
-| `/sitemap-novels.xml` | One `<url>` per novel (`/novel/<slug>`) with `lastmod`, `changefreq`, `priority` and the cover as an image-sitemap entry |
-| `/sitemap-chapters-<slug>.xml` | Every chapter of that novel (`/novel/<slug>/chapter-<n>`), newest 3 chapters flagged `weekly` |
+| `/sitemap-pages.xml` | Home, list/sort pages, finder, and one URL per genre (`genre.html?g=…`) |
+| `/sitemap-novels.xml` | One `<url>` per novel (`novel.html?n=<slug>`) with `lastmod`, `changefreq`, `priority` and the cover as an image-sitemap entry |
+| `/sitemap-chapters-<slug>.xml` | Every chapter of that novel (`read.html?n=<slug>&c=<n>`), newest 3 chapters flagged `weekly` |
 
 * `lastmod` comes from `updatedAt` (novels) / chapter date; completed novels are `monthly`, ongoing `daily`.
 * Output is cached 10 min in memory and invalidated whenever a novel/chapter is created, edited or deleted; gzip is used when the client accepts it.
@@ -206,7 +197,7 @@ shimmer 6 s after `app:ready` and wipes any remaining skeleton at 12 s.
 ## Local dev
 
 ```bash
-npm run dev          # http://localhost:3000  (admin: /admin?dev=dev)
+npm run dev          # http://localhost:3000  (admin: admin.html?dev=dev)
 ```
 
 ## Structure
@@ -221,7 +212,6 @@ js/data.js           API client (window.DB)
 js/app.js            Shared UI, Firebase Auth, Lib/Auth sync (window.Lib / window.Auth)
 css/style.css
 admin.html           Admin panel
-404.html             Not-found page served for unknown routes
 firestore.rules      Firestore security rules
 deploy/setup-oracle.sh, deploy/backup.sh
 data/                (created at runtime) catalog.json, admins.json, chapters/<slug>/<n>.json, uploads/

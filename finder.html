@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Novel Finder - Novelxplin</title>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Sora:wght@600;700&display=swap" rel="stylesheet">
-  <link rel="icon" type="image/svg+xml" href="/img/favicon.svg">
-  <link rel="stylesheet" href="/css/style.css?v=20261013b">
+  <link rel="icon" type="image/svg+xml" href="img/favicon.svg">
+  <link rel="stylesheet" href="css/style.css?v=20261013b">
 </head>
 <body>
   <div id="siteHeader"></div>
@@ -14,7 +14,7 @@
     <div class="wrap">
       <div id="crumb" data-sk="crumb"></div>
       <section class="panel" style="margin-bottom:14px">
-        <div class="panel-head"><h2 id="fTitle" data-sk="title"></h2><a class="more" href="/finder">Reset</a></div>
+        <div class="panel-head"><h2 id="fTitle" data-sk="title"></h2><a class="more" href="finder.html">Reset</a></div>
         <form class="filter-box" id="filters">
           <div class="row"><div class="k">Genres</div><div class="opts" id="gOpts" data-sk="filter-opts"></div></div>
           <div class="row"><div class="k">Type</div><div class="opts" id="tOpts" data-sk="filter-opts:4"></div></div>
@@ -46,17 +46,17 @@
     </div>
   </main>
   <div id="siteFooter"></div>
-  <script src="/js/skeleton.js?v=20261013b"></script>
+  <script src="js/skeleton.js?v=20261013b"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
-  <script src="/js/config.js?v=20261013b"></script>
-  <script src="/js/data.js?v=20261013b"></script>
-  <script src="/js/app.js?v=20261013b"></script>
+  <script src="js/config.js?v=20261013b"></script>
+  <script src="js/data.js?v=20261013b"></script>
+  <script src="js/app.js?v=20261013b"></script>
   <script>
     document.addEventListener("app:ready", () => {
-      const { $, $$, esc, U, nCard, breadcrumb, I } = UI;
-      $("#crumb").innerHTML = breadcrumb([{ label: "Home", href: U.home }, { label: "Novel Finder" }]);
+      const { $, $$, esc, nCard, breadcrumb, I } = UI;
+      $("#crumb").innerHTML = breadcrumb([{ label: "Home", href: "index.html" }, { label: "Novel Finder" }]);
       $("#fTitle").innerHTML = `${I.search} Novel Finder`;
       $("#rTitle").innerHTML = `${I.list} Results`;
       $("#gOpts").innerHTML = DB.GENRES.map(g => `<label><input type="checkbox" name="g" value="${esc(g)}"> ${esc(g)}</label>`).join("");
