@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Novelxplin - Read Web Novels Online</title>
+  <meta name="description" content="Read Novels Online & Discover Free Stories. Latest release novels, completed novels and all genres.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Sora:wght@600;700&display=swap" rel="stylesheet">
+  <link rel="icon" type="image/svg+xml" href="/img/favicon.svg">
+  <link rel="stylesheet" href="/css/style.css">
+  <meta name="google-site-verification" content="5XIfRumeN4WPr1tvJZEMVvmIWbChDgXFXkTDDseFw9s" />
+</head>
+<body>
+  <div id="siteHeader"></div>
+
+  <main class="page">
+    <div class="wrap">
+      <!-- Featured -->
+      <section class="featured" id="featured" data-sk="featured"></section>
+
+      <div class="grid-2">
+        <div>
+          <section class="panel">
+            <div class="panel-head"><h2 id="lrTitle" data-sk="title"></h2><a class="more" href="/latest-release">See more</a></div>
+            <ul class="release-list" id="latestRelease" data-sk="release:14"></ul>
+          </section>
+        </div>
+        <aside class="sidebar-stack">
+          <section class="panel">
+            <div class="panel-head"><h2 id="gTitle" data-sk="title"></h2></div>
+            <div id="genres" data-sk="genres"></div>
+            <a class="see-more" href="/most-popular">See more</a>
+          </section>
+          <section class="panel">
+            <div class="panel-head"><h2 id="rTitle" data-sk="title"></h2><a class="more" href="/most-popular">See more</a></div>
+            <div id="ranking" data-sk="rank:8"></div>
+          </section>
+        </aside>
+      </div>
+
+      <div class="grid-2" style="margin-top:14px">
+        <div style="display:flex;flex-direction:column;gap:14px">
+          <section class="panel">
+            <div class="panel-head"><h2 id="lnTitle" data-sk="title"></h2><a class="more" href="/latest-novels">See more</a></div>
+            <div class="novel-grid" id="latestNovels" data-sk="grid:6"></div>
+          </section>
+          <section class="panel">
+            <div class="panel-head"><h2 id="cTitle" data-sk="title"></h2><a class="more" href="/completed-novels">See more</a></div>
+            <div class="novel-grid" id="completed" data-sk="grid:6"></div>
+          </section>
+        </div>
+        <aside class="sidebar-stack">
+          <section class="panel">
+            <div class="panel-head"><h2 id="hTitle" data-sk="title"></h2><a class="more" href="/library">Library</a></div>
+            <div id="history" data-sk="lib:3"></div>
+          </section>
+        </aside>
+      </div>
+    </div>
+  </main>
+
+  <div id="siteFooter"></div>
+
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+  <script type="module" src="/js/pages/index.js"></script>
+</body>
+</html>

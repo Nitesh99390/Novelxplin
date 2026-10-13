@@ -21,6 +21,9 @@ const zlib = require("zlib");
 const edgeTTS = require("./lib/edgetts");
 
 const ROOT = __dirname;
+// Frontend is built by Vite (src/ → dist/). Static HTML/JS/CSS is served from
+// dist/ (override with STATIC_DIR). Run `npm run build` before `pm2 restart`.
+const STATIC = path.resolve(process.env.STATIC_DIR || path.join(ROOT, "dist"));
 const DATA = path.join(ROOT, "data");
 const CHAP = path.join(DATA, "chapters");
 const UPLOADS = path.join(DATA, "uploads");
@@ -34,7 +37,7 @@ const PORT = +process.env.PORT || 3000;
 let ADMIN_EMAILS = (process.env.ADMIN_EMAILS || "").split(",").map(s => s.trim().toLowerCase()).filter(Boolean);
 let FIREBASE_PROJECT = process.env.FIREBASE_PROJECT_ID || "";
 try {
-  const cfgSrc = fs.readFileSync(path.join(ROOT, "js/config.js"), "utf8");
+  const cfgSrc = fs.readFileSync(path.join(ROOT, "src/js/config.js"), "utf8");
   const m = cfgSrc.match(/ADMIN_EMAILS:\s*\[([^\]]*)\]/);
   if (m && !ADMIN_EMAILS.length) ADMIN_EMAILS = [...m[1].matchAll(/"([^"]+)"/g)].map(x => x[1].toLowerCase());
   const p = cfgSrc.match(/projectId:\s*"([^"]+)"/);
@@ -497,7 +500,7 @@ async function assetVersion(p) {
   const hit = assetVer.get(p);
   if (hit && hit.exp > Date.now()) return hit.v;
   let v = null;
-  try { const st = await fsp.stat(path.join(ROOT, p)); v = crypto.createHash("md5").update(`${st.size}:${Math.round(st.mtimeMs)}`).digest("hex").slice(0, 10); } catch { }
+  try { const st = await fsp.stat(path.join(STATIC, p)); v = crypto.createHash("md5").update(`${st.size}:${Math.round(st.mtimeMs)}`).digest("hex").slice(0, 10); } catch { }
   assetVer.set(p, { exp: Date.now() + 10000, v });
   return v;
 }
@@ -511,7 +514,7 @@ async function versionAssets(html) {
 // Serve an HTML page with per-route <title>, description, canonical + og tags injected.
 const htmlCache = new Map(); // file -> { mtime, body }
 async function sendPage(req, res, r) {
-  const abs = path.join(ROOT, r.file);
+  const abs = path.join(STATIC, r.file);
   let st; try { st = await fsp.stat(abs); } catch { return send(res, 404, "Not found"); }
   let hit = htmlCache.get(r.file);
   if (!hit || hit.mtime !== st.mtimeMs) { hit = { mtime: st.mtimeMs, body: await fsp.readFile(abs, "utf8") }; htmlCache.set(r.file, hit); }
@@ -803,9 +806,10 @@ async function handle(req, res) {
   // ---- static files ----
   if (req.method !== "GET" && req.method !== "HEAD") return send(res, 405, "Method not allowed");
   let file = p === "/" ? "/index.html" : p;
-  if (file.startsWith("/uploads/")) file = "/data" + file;
-  const abs = path.normalize(path.join(ROOT, file));
-  if (!abs.startsWith(ROOT) || abs.startsWith(DATA) && !abs.startsWith(UPLOADS) || abs.includes(path.sep + ".git")) return send(res, 403, "Forbidden");
+  // user uploads live in data/uploads (outside the Vite build); everything else comes from dist/
+  const isUpload = file.startsWith("/uploads/");
+  const abs = isUpload ? path.normalize(path.join(UPLOADS, file.slice("/uploads/".length))) : path.normalize(path.join(STATIC, file));
+  if (isUpload ? !abs.startsWith(UPLOADS + path.sep) : !abs.startsWith(STATIC + path.sep) || abs.includes(path.sep + ".git")) return send(res, 403, "Forbidden");
   let st; try { st = await fsp.stat(abs); } catch { return notFound(req, res); }
   if (st.isDirectory()) return notFound(req, res);
   const ext = path.extname(abs).toLowerCase();

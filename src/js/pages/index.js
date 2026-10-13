@@ -1,0 +1,54 @@
+/* Page entry: index.html (generated from inline script) */
+import "../skeleton.js";
+import "../config.js";
+import "../data.js";
+import "../app.js";
+
+document.addEventListener("app:ready", () => {
+  const { $, esc, U, cover, stars, metaLines, nCard, releaseRow, rankList, genreGrid, I } = UI;
+
+  // Featured block: 1 big + 6 small
+  const feat = DB.featured();
+  if (!feat.length) { $("#featured").innerHTML = `<div class="panel" style="grid-column:1/-1"><div class="empty">${I.book}<div>No novels yet.${Auth.isAdmin() ? ' <a href="/admin" style="color:var(--link)">Upload your first novel</a>.' : ' Check back soon!'}</div></div></div>`; }
+  const big = feat[0] || { color: "#334155", glyph: "📜", slug: "", title: "", rating: 0, genres: [], lang: "", chapters: 0 };
+  const bigHtml = `<div class="panel big">
+    <div class="cover${big.cover ? " has-img" : ""}" style="background:${big.color}">
+      ${big.cover ? `<img src="${esc(big.cover)}" alt="">` : ""}
+      <a href="${U.novel(big.slug)}" style="position:absolute;inset:0;z-index:1" aria-label="${esc(big.title)}"></a>
+      <span class="glyph">${big.glyph}</span>
+      <div class="big-info">
+        <h3><a href="${U.novel(big.slug)}">${esc(big.title)}</a></h3>
+        ${stars(big.rating)}
+        ${metaLines(big)}
+      </div>
+    </div></div>`;
+  const small = feat.slice(1).map(n => `<div class="panel f-card">${cover(n)}<div><h3 class="truncate"><a href="${U.novel(n.slug)}">${esc(n.title)}</a></h3>${stars(n.rating)}${metaLines(n)}</div></div>`).join("");
+  if (feat.length) $("#featured").innerHTML = bigHtml + small;
+
+  // Latest release
+  $("#lrTitle").innerHTML = `${I.refresh} Latest Release Novels`;
+  $("#latestRelease").innerHTML = DB.latestRelease(18).map(releaseRow).join("");
+
+  // Genres
+  $("#gTitle").innerHTML = `${I.list} Genres`;
+  $("#genres").innerHTML = genreGrid();
+
+  // Ranking
+  $("#rTitle").innerHTML = `${I.star} Top Rated`;
+  $("#ranking").innerHTML = rankList(DB.rankByRating(8));
+
+  // Latest novels
+  $("#lnTitle").innerHTML = `${I.book} Latest Novels`;
+  $("#latestNovels").innerHTML = DB.latestNovels(6).map(n => nCard(n)).join("");
+
+  // Completed
+  $("#cTitle").innerHTML = `${I.check} Completed Novels`;
+  $("#completed").innerHTML = DB.completed(6).map(n => nCard(n, { showFull: true, fullRibbon: true })).join("");
+
+  // Reading history
+  $("#hTitle").innerHTML = `${I.clock} Continue Reading`;
+  const hist = Object.entries(Lib.history()).sort((a, b) => b[1].at - a[1].at).slice(0, 6);
+  $("#history").innerHTML = hist.length
+    ? `<ul class="lib-list">${hist.map(([id, h]) => { const n = DB.get(id); if (!n) return ""; return `<li>${cover(n)}<div><div class="t truncate"><a href="${U.novel(n.slug)}">${esc(n.title)}</a></div><div class="s">Last read: <a href="${U.chapter(n.slug, h.chap)}">Chapter ${h.chap}</a></div></div><a class="rm" href="${U.chapter(n.slug, h.chap)}">${I.right}</a></li>`; }).join("")}</ul>`
+    : `<div class="empty">${I.book}<div>No reading history yet.<br>Start a novel and it will show up here.</div></div>`;
+});

@@ -284,3 +284,30 @@ firestore.rules      Firestore security rules
 deploy/setup-oracle.sh, deploy/backup.sh
 data/                (created at runtime) catalog.json, admins.json, chapters/<slug>/<n>.json, uploads/
 ```
+
+## Build system (Vite + obfuscation)
+
+The frontend lives in `src/` and is compiled by Vite into `dist/`, which `server.js` serves.
+Output is minified, split into hashed chunks (`/_nx/static/chunks/[name]-[hash].js`) and passed
+through `javascript-obfuscator` (control-flow flattening, RC4/base64 string arrays, dead-code
+injection, self-defending). **Never deploy `src/` directly – always `npm run build` first.**
+
+```
+src/
+  *.html              page shells (one <script type="module"> each)
+  css/style.css
+  js/{config,data,app,skeleton,tts,reader}.js   shared modules (unchanged logic)
+  js/pages/*.js       per-page logic (former inline <script> blocks)
+  public/img/         copied verbatim to dist/img
+vite.config.js        chunking / hashing / obfuscator settings
+dist/                 build output (git-ignored) → served by server.js
+```
+
+```bash
+npm install                 # installs vite + javascript-obfuscator (devDependencies)
+npm run build               # src/ → dist/
+npm run dev:vite            # HMR dev server on :5173 (proxies /api to :3000)
+npm run deploy              # build + pm2 restart novelxplin
+```
+
+`server.js` reads static files from `dist/` (override with `STATIC_DIR=/path`).

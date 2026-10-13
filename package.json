@@ -1,12 +1,22 @@
 {
   "name": "novelxplin",
   "version": "1.0.0",
-  "description": "Novelxplin – web novel reading site. Static frontend + zero-dependency Node backend (Oracle VM) + Firebase auth/sync.",
+  "description": "Novelxplin – web novel reading site. Vite-built (obfuscated, hashed chunks) vanilla-JS frontend + zero-dependency Node backend (Oracle VM) + Firebase auth/sync.",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "PORT=3000 ADMIN_DEV_TOKEN=dev node server.js"
+    "dev": "PORT=3000 ADMIN_DEV_TOKEN=dev node server.js",
+    "dev:vite": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "deploy": "npm run build && pm2 restart novelxplin"
   },
-  "engines": { "node": ">=18" },
-  "license": "MIT"
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "javascript-obfuscator": "^5.9.0",
+    "vite": "^5.4.21"
+  }
 }
