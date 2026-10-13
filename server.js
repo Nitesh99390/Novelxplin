@@ -18,6 +18,7 @@ const path = require("path");
 const crypto = require("crypto");
 const https = require("https");
 const zlib = require("zlib");
+const edgeTTS = require("./lib/edgetts");
 
 const ROOT = __dirname;
 const DATA = path.join(ROOT, "data");
@@ -549,6 +550,16 @@ async function saveImage(buf, ct) {
   return "/uploads/" + name;
 }
 
+/* ---------- TTS relay cache (small, memory-bounded: ≤ 6 MB) ---------- */
+const ttsCache = new Map(); const TTS_TTL = 10 * 60 * 1000, TTS_MAX = +process.env.TTS_MAX_PARALLEL || 8;
+let ttsBusy = 0;
+function ttsEvict() {
+  let bytes = 0; const now = Date.now();
+  for (const [k, v] of ttsCache) { if (v.exp < now) ttsCache.delete(k); else bytes += v.buf.length; }
+  for (const k of ttsCache.keys()) { if (bytes <= 6 * 1024 * 1024) break; bytes -= ttsCache.get(k).buf.length; ttsCache.delete(k); }
+}
+setInterval(ttsEvict, 60 * 1000).unref();
+
 /* ---------- router ---------- */
 async function handle(req, res) {
   const url = new URL(req.url, "http://x");
@@ -655,6 +666,35 @@ async function handle(req, res) {
         if (req.method === "DELETE") { await requireAdmin(req); await fsp.rm(chapFile(slug, cn), { force: true }); await updateIndex(slug, cn, null); await refreshNovelStats(n); return send(res, 200, { ok: true }); }
       }
       return send(res, 405, { error: "Method not allowed" });
+    }
+
+    // ---- Listen: Edge neural voice relay ----
+    // Microsoft now blocks browsers that are not Edge (403), so the phone can no longer talk to the
+    // voice service directly. The server speaks the Edge protocol on its behalf and streams back MP3.
+    // Cheap: ~50 KB per paragraph, 1-second in-memory cache, max 8 parallel synths, 1500-char cap.
+    //   GET /api/tts?voice=hi-IN-SwaraNeural&rate=1.1&q=<text>   or   POST {voice, rate, text}
+    if (seg[1] === "tts") {
+      if (req.method !== "GET" && req.method !== "POST") return send(res, 405, { error: "Method not allowed" });
+      let voice, rate, text;
+      if (req.method === "POST") { const b = await readJSON(req, 64 * 1024); voice = b.voice; rate = b.rate; text = b.text; }
+      else { voice = url.searchParams.get("voice"); rate = url.searchParams.get("rate"); text = url.searchParams.get("q"); }
+      voice = String(voice || "en-US-AriaNeural").trim(); rate = Math.max(0.5, Math.min(2, +rate || 1));
+      text = String(text || "").replace(/\s+/g, " ").trim().slice(0, 1500);
+      if (!edgeTTS.VOICE_RE.test(voice)) return send(res, 400, { error: "Invalid voice" });
+      if (!text) return send(res, 400, { error: "Missing text" });
+      const key = crypto.createHash("sha1").update(`${voice}|${rate}|${text}`).digest("hex");
+      const hit = ttsCache.get(key);
+      if (hit && hit.exp > Date.now()) { hit.exp = Date.now() + TTS_TTL; return send(res, 200, hit.buf, { "Content-Type": "audio/mpeg", "Cache-Control": "public, max-age=86400", "X-TTS-Cache": "HIT" }); }
+      if (ttsBusy >= TTS_MAX) return send(res, 503, { error: "Voice server busy – try again" }, { "Retry-After": "2" });
+      ttsBusy++;
+      try {
+        const buf = await edgeTTS.synthesize(text, voice, { rate, timeout: 25000 });
+        ttsCache.set(key, { buf, exp: Date.now() + TTS_TTL }); ttsEvict();
+        return send(res, 200, buf, { "Content-Type": "audio/mpeg", "Cache-Control": "public, max-age=86400", "X-TTS-Cache": "MISS" });
+      } catch (e) {
+        console.warn("[tts]", e.message);
+        return send(res, 502, { error: "Edge voice unavailable: " + e.message });
+      } finally { ttsBusy--; }
     }
 
     // cover image upload (raw bytes, Content-Type image/*) -> /uploads/<id>.<ext>
