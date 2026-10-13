@@ -9,7 +9,7 @@ Frontend (static HTML/CSS/JS)  ──►  server.js (Node, zero deps) on Oracle 
          └──►  Firebase: Google login · Firestore (users/{uid}: library, history · comments)
 ```
 
-**Owner** = the Google account(s) listed in `js/config.js → ADMIN_EMAILS`
+**Owner** = the Google account(s) listed in `src/js/config.js → ADMIN_EMAILS`
 (currently **bhuimharniteshbhuimhar@gmail.com**). The owner can add / remove **extra admins**
 from the admin panel (“Admins” box) – just type an email and confirm. Whoever signs in with
 Google using that email automatically gets the **Admin** button in the header → `admin.html`
@@ -84,7 +84,7 @@ Code: `js/tts.js` (engines) + the TTS section of `js/reader.js`.
    Under *Settings → Authorized domains* add your Oracle IP / domain (e.g. `144.24.114.118`).
 3. **Build → Firestore Database → Create** (production mode) → *Rules* tab → paste `firestore.rules` → Publish.
 4. **Project settings → Your apps → Web (</>)** → register → copy the `firebaseConfig` object
-   into `js/config.js` (`FIREBASE: {...}`).
+   into `src/js/config.js` (`FIREBASE: {...}`).
 
 Without Firebase config the site still works (library/history stay in localStorage, no login).
 
@@ -93,8 +93,8 @@ Without Firebase config the site still works (library/history stay in localStora
 ```bash
 ssh ubuntu@144.24.114.118
 git clone https://github.com/Nitesh99390/Novelxplin.git && cd Novelxplin
-nano js/config.js              # paste Firebase config
-bash deploy/setup-oracle.sh    # installs Node 20, swap, systemd service, port 80 → 3000
+nano src/js/config.js          # paste Firebase config + owner email
+bash deploy/setup-oracle.sh    # npm install + npm run build (src/ → dist/), Node 20, swap, systemd service, port 80 → 3000
 ```
 
 Then open `http://144.24.114.118/`. In the **OCI console → VCN → Security List** add an
@@ -104,7 +104,7 @@ Ingress rule for TCP 80 (and 3000) from `0.0.0.0/0`.
 |------|---------|
 | Logs | `sudo journalctl -u novelxplin -f` |
 | Restart | `sudo systemctl restart novelxplin` |
-| Update code | `git pull && sudo systemctl restart novelxplin` |
+| Update code | `bash deploy/update.sh` (= `git pull && npm run build && sudo systemctl restart novelxplin`) |
 | Backup data | `bash deploy/backup.sh` → `backups/novelxplin-data-YYYY-MM-DD.tar.gz` |
 
 Memory footprint ≈ 50 MB RSS; chapters are streamed from disk, so 47 GB storage ≈ tens of thousands of chapters.
@@ -274,7 +274,7 @@ lib/bot.js           Telegram upload bot (long polling, photo → details → ep
 lib/epub.js          Zero-dependency EPUB parser (ZIP + XHTML → chapters) used by the bot
 lib/edgetts.js       Zero-dependency Edge neural TTS client (Sec-MS-GEC v2 token + RFC-6455 WebSocket) behind /api/tts
 js/skeleton.js       Sync skeleton painter – fills #siteHeader + every [data-sk] before data arrives (window.SK)
-js/config.js         Firebase config, owner email(s), API base
+src/js/config.js     Firebase config, owner email(s), API base
 js/data.js           API client (window.DB)
 js/app.js            Shared UI, Firebase Auth, Lib/Auth sync (window.Lib / window.Auth)
 css/style.css

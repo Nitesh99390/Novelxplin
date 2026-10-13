@@ -1,14 +1,21 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Site owner (same as ADMIN_EMAILS in js/config.js)
+    // Signed-in Google account with a verified e-mail, lower-cased. The admin panel stores
+    // admins/{email} lower-cased, and Google may report mixed-case addresses in the token,
+    // so every comparison goes through this normalised value.
+    function email() {
+      return request.auth != null && request.auth.token.email_verified == true
+        ? request.auth.token.email.lower() : "";
+    }
+    // Site owner (same as ADMIN_EMAILS in src/js/config.js) – keep this lower-case
     function isOwner() {
-      return request.auth != null && request.auth.token.email == "bhuimharniteshbhuimhar@gmail.com";
+      return email() == "bhuimharniteshbhuimhar@gmail.com";
     }
     // Extra admins: owner mirrors data/admins.json into admins/{email} from the admin panel
     function isAdmin() {
-      return isOwner() || (request.auth != null
-        && exists(/databases/$(database)/documents/admins/$(request.auth.token.email)));
+      return isOwner() || (email() != ""
+        && exists(/databases/$(database)/documents/admins/$(email())));
     }
 
     // Each user owns exactly one doc: library, history, profile

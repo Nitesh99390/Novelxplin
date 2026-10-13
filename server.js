@@ -32,7 +32,7 @@ const ADMINS_FILE = path.join(DATA, "admins.json");
 const RATINGS_FILE = path.join(DATA, "ratings.json");
 const PORT = +process.env.PORT || 3000;
 
-// Owner emails (super-admins): env override or js/config.js. Owners can add/remove
+// Owner emails (super-admins): env override or src/js/config.js. Owners can add/remove
 // extra admins from the admin panel; those are persisted in data/admins.json.
 let ADMIN_EMAILS = (process.env.ADMIN_EMAILS || "").split(",").map(s => s.trim().toLowerCase()).filter(Boolean);
 let FIREBASE_PROJECT = process.env.FIREBASE_PROJECT_ID || "";
@@ -44,6 +44,7 @@ try {
   if (p && !FIREBASE_PROJECT) FIREBASE_PROJECT = p[1];
 } catch { }
 if (!ADMIN_EMAILS.length) ADMIN_EMAILS = ["bhuimharniteshbhuimhar@gmail.com"];
+if (!FIREBASE_PROJECT) console.warn("[auth] FIREBASE_PROJECT_ID not set – ID-token audience is only self-consistency checked. Set it (or projectId in src/js/config.js).");
 
 for (const d of [DATA, CHAP, UPLOADS]) fs.mkdirSync(d, { recursive: true });
 if (!fs.existsSync(CATALOG)) fs.writeFileSync(CATALOG, "[]");
@@ -67,15 +68,26 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 /* ---------- catalog (kept in memory, persisted atomically) ---------- */
 let catalog = [];
 try { catalog = JSON.parse(fs.readFileSync(CATALOG, "utf8")); } catch { catalog = []; }
-let saveTimer = null;
-function saveCatalog() {
-  clearTimeout(saveTimer);
-  saveTimer = setTimeout(async () => {
-    const tmp = CATALOG + ".tmp";
-    await fsp.writeFile(tmp, JSON.stringify(catalog));
-    await fsp.rename(tmp, CATALOG);
-  }, 150);
+// Debounced, atomic JSON persistence. Writes never throw into the event loop (a disk error is
+// logged and retried on the next change) and pending writes are flushed on shutdown.
+function persister(file, getData, label) {
+  let timer = null, dirty = false, writing = false;
+  async function flush() {
+    if (writing) { dirty = true; return; }
+    writing = true; dirty = false;
+    try { const tmp = file + ".tmp"; await fsp.writeFile(tmp, JSON.stringify(getData())); await fsp.rename(tmp, file); }
+    catch (e) { console.error(`[persist] ${label} write failed:`, e.message); dirty = true; }
+    finally { writing = false; if (dirty) { dirty = false; schedule(); } }
+  }
+  function schedule() { clearTimeout(timer); timer = setTimeout(() => { timer = null; flush().catch(() => { }); }, 150); }
+  function flushSync() {
+    if (!timer && !dirty) return; clearTimeout(timer); timer = null;
+    try { fs.writeFileSync(file + ".tmp", JSON.stringify(getData())); fs.renameSync(file + ".tmp", file); } catch (e) { console.error(`[persist] ${label} final write failed:`, e.message); }
+  }
+  return { schedule, flushSync };
 }
+const catalogStore = persister(CATALOG, () => catalog, "catalog");
+const saveCatalog = () => catalogStore.schedule();
 const bySlug = s => catalog.find(n => n.slug === s);
 
 /* ---------- user ratings (any signed-in Google user, 1 vote per user per novel) ----------
@@ -84,15 +96,10 @@ const bySlug = s => catalog.find(n => n.slug === s);
    yet, the admin-entered "base rating" (n.baseRating, set from the admin panel / bot) is shown. */
 let ratings = {};
 try { ratings = JSON.parse(fs.readFileSync(RATINGS_FILE, "utf8")); if (!ratings || typeof ratings !== "object" || Array.isArray(ratings)) ratings = {}; } catch { ratings = {}; }
-let ratingsTimer = null;
-function saveRatings() {
-  clearTimeout(ratingsTimer);
-  ratingsTimer = setTimeout(async () => {
-    const tmp = RATINGS_FILE + ".tmp";
-    await fsp.writeFile(tmp, JSON.stringify(ratings));
-    await fsp.rename(tmp, RATINGS_FILE);
-  }, 150);
-}
+const ratingsStore = persister(RATINGS_FILE, () => ratings, "ratings");
+const saveRatings = () => ratingsStore.schedule();
+for (const sig of ["SIGTERM", "SIGINT"]) process.on(sig, () => { catalogStore.flushSync(); ratingsStore.flushSync(); process.exit(0); });
+process.on("unhandledRejection", e => console.error("[unhandledRejection]", e && e.message || e));
 function ratingSummary(slug) {
   const votes = Object.values(ratings[slug] || {});
   const dist = [0, 0, 0, 0, 0];
@@ -124,11 +131,21 @@ async function chapterIndex(slug) {
   let idx = {}; try { idx = JSON.parse(await fsp.readFile(path.join(dir, "_index.json"), "utf8")); } catch { }
   return nums.map(num => ({ num, title: (idx[num] && idx[num].t) || `Chapter ${num}`, date: (idx[num] && idx[num].d) || "" }));
 }
-async function updateIndex(slug, num, title, date) {
-  const f = path.join(chapDir(slug), "_index.json");
-  let idx = {}; try { idx = JSON.parse(await fsp.readFile(f, "utf8")); } catch { }
-  if (title === null) delete idx[num]; else idx[num] = { t: title, d: date };
-  await fsp.writeFile(f, JSON.stringify(idx));
+// _index.json is read-modify-write: serialise per slug so parallel uploads (web + Telegram bot)
+// can't drop each other's titles; write atomically so a crash can't leave a half-written file.
+const indexLocks = new Map(); // slug -> Promise chain
+function updateIndex(slug, num, title, date) {
+  const prev = indexLocks.get(slug) || Promise.resolve();
+  const run = prev.catch(() => { }).then(async () => {
+    const f = path.join(chapDir(slug), "_index.json");
+    let idx = {}; try { idx = JSON.parse(await fsp.readFile(f, "utf8")); } catch { }
+    if (title === null) delete idx[num]; else idx[num] = { t: title, d: date };
+    const tmp = `${f}.${process.pid}.${Date.now()}.tmp`;
+    await fsp.writeFile(tmp, JSON.stringify(idx)); await fsp.rename(tmp, f);
+  });
+  indexLocks.set(slug, run);
+  run.finally(() => { if (indexLocks.get(slug) === run) indexLocks.delete(slug); }).catch(() => { });
+  return run;
 }
 async function refreshNovelStats(n) {
   const list = await chapterIndex(n.slug);
@@ -162,9 +179,14 @@ async function verifyIdToken(token) {
   const ok = crypto.createVerify("RSA-SHA256").update(parts[0] + "." + parts[1]).verify(cert, b64url(parts[2]));
   if (!ok) throw new Error("bad signature");
   const now = Math.floor(Date.now() / 1000);
-  if (payload.exp < now) throw new Error("expired");
+  if (!(payload.exp > now)) throw new Error("expired");
+  if (payload.iat && payload.iat > now + 300) throw new Error("issued in the future");
+  if (!payload.aud || typeof payload.aud !== "string") throw new Error("no audience");
   if (FIREBASE_PROJECT && payload.aud !== FIREBASE_PROJECT) throw new Error("bad audience");
+  if (payload.iss !== "https://securetoken.google.com/" + payload.aud) throw new Error("bad issuer");
+  if (!payload.sub) throw new Error("no subject");
   if (!payload.email) throw new Error("no email");
+  if (payload.email_verified !== true) throw new Error("email not verified");
   return payload;
 }
 async function requireAdmin(req) {
@@ -451,8 +473,11 @@ function legacyToClean(p, sp) {
 }
 
 // Clean path → { file, title, desc, canonical, robots } or null (= not a page route)
-function resolveRoute(p, base) {
-  const seg = p.split("/").filter(Boolean);
+// Takes the RAW (still percent-encoded) pathname: segments are decoded one by one so a search
+// term containing "/" (%2F) stays a single segment, and a malformed %xx yields 404 instead of 500.
+const decSeg = s => { try { return decodeURIComponent(s); } catch { return s; } };
+function resolveRoute(rawPath, base) {
+  const seg = rawPath.split("/").filter(Boolean).map(decSeg);
   let page = 1;
   if (seg.length >= 2 && seg[seg.length - 2] === "page" && /^\d+$/.test(seg[seg.length - 1])) { page = +seg.pop(); seg.pop(); }
   const [a, b, c] = seg;
@@ -483,7 +508,10 @@ function resolveRoute(p, base) {
     const names = { "latest-novels": "Latest Novels", "latest-release": "Latest Release Novels", "most-popular": "Most Popular Novels", "completed-novels": "Completed Novels" };
     return R("list.html", `${stTxt(b)}${names[a]}${sfx}`, `${names[a]} on ${SITE_NAME} – ${SITE_DESC}`, `/${a}${stSeg(b)}${pgSeg(page)}`);
   }
-  if (a === "search" && seg.length <= 2) return R("search.html", b ? `Search: ${b}` : "Search", SITE_DESC, `/search${b ? "/" + encodeURIComponent(b) : ""}${pgSeg(page)}`, "noindex");
+  if (a === "search" && seg.length <= 3) {
+    if (c && !/^(ongoing|completed)$/.test(c)) return null; // /search/<term>/<ongoing|completed>
+    return R("search.html", b ? `${stTxt(c)}Search: ${b}${sfx}` : "Search", SITE_DESC, `/search${b ? "/" + encodeURIComponent(b) : ""}${stSeg(c)}${pgSeg(page)}`, "noindex");
+  }
   if (PATH_PAGES.has(a) && (seg.length === 1 || (a === "admin" && seg.length === 2))) {
     const t = { library: "Your Library", finder: "Novel Finder", admin: "Admin" }[a];
     return R(`${a}.html`, t, SITE_DESC, `/${a}`, a === "finder" ? undefined : "noindex");
@@ -549,6 +577,7 @@ async function notFound(req, res) {
 }
 
 // Returns true when the request was handled (redirect or page), false → fall through to static files.
+// `p` is the decoded path (legacy *.html + static lookups), `url.pathname` the raw one (routes).
 async function handleRoutes(req, res, p, url) {
   if (req.method !== "GET" && req.method !== "HEAD") return false;
   // 1) legacy *.html → 301 to clean URL
@@ -559,7 +588,7 @@ async function handleRoutes(req, res, p, url) {
   // 2) trailing slash / uppercase normalisation (except root)
   if (p.length > 1 && p.endsWith("/")) { send(res, 301, "", { Location: p.replace(/\/+$/, "") + url.search }); return true; }
   // 3) clean routes
-  const r = resolveRoute(p, siteBase(req));
+  const r = resolveRoute(url.pathname, siteBase(req));
   if (!r) return false;
   // /search?q=term (plain form submit without JS) → /search/term
   if (r.file === "search.html" && url.searchParams.get("q") && p === "/search") {
@@ -639,7 +668,7 @@ setInterval(ttsEvict, 60 * 1000).unref();
 /* ---------- router ---------- */
 async function handle(req, res) {
   const url = new URL(req.url, "http://x");
-  const p = decodeURIComponent(url.pathname);
+  let p; try { p = decodeURIComponent(url.pathname); } catch { p = url.pathname; } // malformed %xx → plain 404, not 500
   res.req = req;
   if (req.method === "OPTIONS") return send(res, 204, "");
 
@@ -716,7 +745,15 @@ async function handle(req, res) {
         }
         return send(res, 405, { error: "Method not allowed" });
       }
-      if (sub === "view" && req.method === "POST") { n.views = (n.views || 0) + 1; saveCatalog(); return send(res, 200, { views: n.views }); }
+      // One view = one chapter actually opened by a reader. The reader page POSTs this once per
+      // chapter shown; chapter GETs themselves do NOT count (they also fire for prefetch, TTS
+      // warm-up and retries, which used to double/triple the numbers). Needs the page token so
+      // plain scripts can't inflate it; without one we still answer 200 but don't count.
+      if (sub === "view" && req.method === "POST") {
+        const r = rateLimit(req, 60, 1500); if (!r.ok) return send(res, r.code, { error: r.msg }, { "Retry-After": String(r.retry) });
+        if (checkToken(req)) { n.views = (n.views || 0) + 1; saveCatalog(); }
+        return send(res, 200, { views: n.views || 0 });
+      }
       if (sub === "chapters") {
         if (!num && req.method === "GET") { const r = rateLimit(req, 60, 1200); if (!r.ok) return send(res, r.code, { error: r.msg }, { "Retry-After": String(r.retry) }); return send(res, 200, await chapterIndex(slug), { "Cache-Control": "no-cache" }); }
         // POST: add one chapter {num?, title, body}  OR bulk {chapters:[{num,title,body}]}
@@ -729,7 +766,7 @@ async function handle(req, res) {
         const cn = safeNum(num); if (!cn) return send(res, 400, { error: "Bad chapter number" });
         if (req.method === "GET") {
           const g = guardChapter(req); if (g) return send(res, g.code, g.body, g.headers);
-          try { const raw = await fsp.readFile(chapFile(slug, cn)); n.views = (n.views || 0) + 1; saveCatalog(); return send(res, 200, raw, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "private, max-age=300", "Vary": "X-NX-Token" }); }
+          try { const raw = await fsp.readFile(chapFile(slug, cn)); return send(res, 200, raw, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "private, max-age=300", "Vary": "X-NX-Token" }); }
           catch { return send(res, 404, { error: "Chapter not found" }); }
         }
         if (req.method === "PUT") {

@@ -10,6 +10,7 @@ document.addEventListener("app:ready", async () => {
   if (!n) { SK.clear(); $("#head").innerHTML = `<div class="empty">${I.search}<div>Novel not found.</div></div>`; return; }
   document.title = `${n.title} - Novelxplin`;
   const PER = 50;
+  const latest = DB.latestNum(n); // real latest chapter number (n.chapters is only a count)
   const hist = Lib.history()[n.id];
   const inLib = Lib.has(n.id);
   const views = n.views >= 1e6 ? (n.views / 1e6).toFixed(1) + "M" : n.views >= 1e3 ? Math.round(n.views / 1e3) + "K" : n.views;
@@ -37,10 +38,10 @@ document.addEventListener("app:ready", async () => {
       <div class="info-row"><div class="k">${I.check} Status</div><div class="v" style="color:${n.status === "Completed" ? "var(--green)" : "var(--accent)"};font-weight:700">${n.status}</div></div>
       <div class="info-row"><div class="k">${I.book} Chapters</div><div class="v">${n.chapters}</div></div>
       <div class="info-row"><div class="k">${I.eye} Views</div><div class="v">${views}</div></div>
-      <div class="info-row"><div class="k">${I.clock} Updated</div><div class="v">${DB.timeAgo(n.updatedMinutesAgo)}${n.chapters ? ` &middot; <a href="${U.chapter(n.slug, n.chapters)}">${esc(DB.chapterTitle(n, n.chapters))}</a>` : ""}</div></div>
+      <div class="info-row"><div class="k">${I.clock} Updated</div><div class="v">${DB.timeAgo(n.updatedMinutesAgo)}${latest ? ` &middot; <a href="${U.chapter(n.slug, latest)}">${esc(DB.chapterTitle(n, latest))}</a>` : ""}</div></div>
       <div class="btn-row">
-        ${n.chapters ? `<a class="btn" href="${U.chapter(n.slug, 1)}">${I.book} Read First</a>
-        <a class="btn alt" href="${U.chapter(n.slug, n.chapters)}">${I.right} Read Latest</a>` : `<span class="btn disabled">No chapters yet</span>`}
+        ${latest ? `<a class="btn" id="readFirst" href="${U.chapter(n.slug, 1)}">${I.book} Read First</a>
+        <a class="btn alt" href="${U.chapter(n.slug, latest)}">${I.right} Read Latest</a>` : `<span class="btn disabled">No chapters yet</span>`}
         ${hist ? `<a class="btn ghost" href="${U.chapter(n.slug, hist.chap)}">${I.clock} Continue Ch. ${hist.chap}</a>` : ""}
         <button class="btn ghost ${inLib ? "active" : ""}" id="libBtn">${I.heart} <span>${inLib ? "In Library" : "Add to Library"}</span></button>
         ${Auth.isAdmin() ? `<a class="btn ghost" href="${U.admin(n.slug)}">${I.pen} Edit / Add chapters</a>` : ""}
@@ -114,13 +115,16 @@ document.addEventListener("app:ready", async () => {
   $("#chapters").innerHTML = SK.html("chapters", 20);
   let all = [];
   try { all = await DB.chapters(n.slug); } catch (e) { $("#chapters").innerHTML = `<div class="empty" style="grid-column:1/-1">Failed to load chapters.</div>`; }
+  // "Read First" must open the first chapter that actually exists (EPUBs may start at e.g. 501)
+  if (all.length) { const rf = $("#readFirst"); if (rf) rf.href = U.chapter(n.slug, all[0].num); }
   const pages = Math.max(1, Math.ceil(all.length / PER));
   let cur = Math.min(Math.max(1, parseInt(q.get("page") || "1", 10)), pages);
   const sel = $("#chapRange");
   for (let p = 1; p <= pages; p++) { const o = document.createElement("option"); o.value = p; o.textContent = `${(p - 1) * PER + 1} - ${Math.min(p * PER, all.length)}`; if (p === cur) o.selected = true; sel.appendChild(o); }
   sel.addEventListener("change", () => { cur = +sel.value; renderChapters(""); });
 
-  const row = ch => `<a href="${U.chapter(n.slug, ch.num)}" class="${ch.num > all.length - 3 && n.status !== "Completed" ? "new-chap" : ""}">${I.chev}<span class="t truncate">${esc(ch.title || "Chapter " + ch.num)}</span><span class="d">${esc((ch.date || "").slice(0, 10))}</span></a>`;
+  const newFrom = all.length ? all.length - 3 : Infinity; // index position, not chapter number
+  const row = ch => `<a href="${U.chapter(n.slug, ch.num)}" class="${all.indexOf(ch) >= newFrom && n.status !== "Completed" ? "new-chap" : ""}">${I.chev}<span class="t truncate">${esc(ch.title || "Chapter " + ch.num)}</span><span class="d">${esc((ch.date || "").slice(0, 10))}</span></a>`;
   function renderChapters(filter) {
     let items;
     if (filter) { const f = filter.toLowerCase(); items = all.filter(c => (c.title || "").toLowerCase().includes(f) || String(c.num) === f).slice(0, 100); }

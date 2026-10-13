@@ -73,6 +73,12 @@
     return novels;
   })();
 
+  // Real number of the newest chapter. n.chapters is only a COUNT of chapter files – with EPUB
+  // numbering gaps (e.g. 501–600, or a deleted chapter) it is NOT a valid chapter number.
+  function latestNum(novel) {
+    if (novel && novel.latest && +novel.latest.num > 0) return +novel.latest.num;
+    return novel && novel.chapters > 0 ? novel.chapters : 0;
+  }
   function chapterTitle(novel, idx) {
     if (novel.latest && novel.latest.num === idx && novel.latest.title) return novel.latest.title;
     return `Chapter ${idx}`;
@@ -95,7 +101,7 @@
   }
 
   window.DB = {
-    GENRES, GENRE_COLORS, LANGS, STATUS, PALETTE, GLYPHS, ready, api, slugify, genreName, timeAgo, chapterTitle,
+    GENRES, GENRE_COLORS, LANGS, STATUS, PALETTE, GLYPHS, ready, api, slugify, genreName, timeAgo, chapterTitle, latestNum,
     get novels() { return novels; },
     get error() { return loadError; },
     get(slug) { return bySlug[slug] || null; },

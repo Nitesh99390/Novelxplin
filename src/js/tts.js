@@ -44,12 +44,21 @@
   const label = (groups, id) => { const v = flat(groups).find(v => v[0] === id); return v ? v[1] : id; };
 
   /* ---- Edge neural via server relay → Blob URL (mp3) ---- */
+  // POST body, not GET query: a Hindi paragraph grows ~9× under encodeURIComponent and blew past
+  // Node's ~16 KB header limit (431). The server caps text at 1500 chars either way.
   async function edge(text, voice, rate, signal, pitch) {
-    const r = await fetch(`/api/tts?voice=${encodeURIComponent(voice)}&rate=${encodeURIComponent(rate || 1)}&pitch=${encodeURIComponent(pitch || 0)}&q=${encodeURIComponent(text)}`, { signal });
+    const r = await fetch("/api/tts", { method: "POST", signal, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ voice, rate: rate || 1, pitch: pitch || 0, text }) });
     if (!r.ok) { let m = `HTTP ${r.status}`; try { m = (await r.json()).error || m; } catch { } throw new Error(m); }
     const b = await r.blob();
     if (!b.size) throw new Error("Edge voice returned no audio");
     return URL.createObjectURL(b);
+  }
+  // Server truncates at 1500 chars – very long paragraphs are split at sentence ends and played as a queue.
+  const EDGE_MAX = 1400;
+  async function edgeAll(text, voice, rate, signal, pitch) {
+    const parts = text.length <= EDGE_MAX ? [text] : splitGoogle(text, EDGE_MAX);
+    const out = []; for (const p of parts) out.push(await edge(p, voice, rate, signal, pitch)); // sequential: keeps server load bounded
+    return out;
   }
 
   /* ---- Google Translate TTS (gTTS) → list of ≤200-char URLs ---- */
@@ -77,9 +86,9 @@
 
   /* synthesize → Promise<string[]> (audio URLs to play in order) */
   async function synthesize(engine, text, voice, rate, signal, pitch) {
-    if (engine === "edge") return [await edge(text, voice, rate, signal, pitch)];
+    if (engine === "edge") return edgeAll(text, voice, rate, signal, pitch);
     if (engine === "google") {
-      if (/^edge:/.test(voice)) return [await edge(text, voice.slice(5), rate, signal, pitch)]; // male Hindi via neural relay
+      if (/^edge:/.test(voice)) return edgeAll(text, voice.slice(5), rate, signal, pitch); // male Hindi via neural relay
       return google(text, voice);
     }
     throw new Error("unknown engine");
