@@ -42,7 +42,7 @@
       let m = r.statusText, code = ""; try { const j = await r.json(); m = j.error || m; code = j.code || ""; } catch { }
       if (r.status === 403 && code === "token" && !retry && await refreshToken()) return api(path, opts, true);
       if (r.status === 429) m = "Too many requests – please wait a moment";
-      throw new Error(m);
+      throw Object.assign(new Error(m), { status: r.status, code });
     }
     return r.json();
   }
@@ -102,7 +102,13 @@
     // async: full chapter index [{num,title,date}]
     chapters(slug) { return api(`/api/novels/${encodeURIComponent(slug)}/chapters`); },
     // async: {num,title,date,body:[...]}
-    chapter(slug, num) { return api(`/api/novels/${encodeURIComponent(slug)}/chapters/${num}`); },
+    async chapter(slug, num) {
+      let token = null;
+      try { token = window.Auth && typeof window.Auth.token === "function" ? await window.Auth.token() : null; } catch { }
+      return api(`/api/novels/${encodeURIComponent(slug)}/chapters/${num}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
+      });
+    },
     featured() { return [...novels].sort((a, b) => b.views - a.views).slice(0, 7); },
     latestRelease(limit) { return [...novels].filter(n => n.chapters > 0).sort((a, b) => a.updatedMinutesAgo - b.updatedMinutesAgo).slice(0, limit || novels.length); },
     latestNovels(limit) { return [...novels].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)).slice(0, limit || novels.length); },
