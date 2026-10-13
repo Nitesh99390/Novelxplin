@@ -7,7 +7,7 @@
   <meta name="robots" content="noindex">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Sora:wght@600;700&display=swap" rel="stylesheet">
   <link rel="icon" type="image/svg+xml" href="img/favicon.svg">
-  <link rel="stylesheet" href="css/style.css?v=20261013a">
+  <link rel="stylesheet" href="css/style.css?v=20261013b">
   <style>
     #panelWrap > div, #panelWrap > aside, .panel { min-width: 0; }
     .panel > .adm-form, .panel > .btn-row, .panel > .hint, .panel > #filter, .panel > .adm-list { margin-left: 12px; margin-right: 12px; }
@@ -87,7 +87,7 @@
               </div>
               <div class="two">
                 <label>Status<select name="status"><option>Ongoing</option><option>Completed</option></select></label>
-                <label>Rating (0–5)<input name="rating" type="number" step="0.1" min="0" max="5" value="0"></label>
+                <label title="Shown until real readers vote; after that the average of user votes is displayed">Base rating (0–5)<input name="rating" type="number" step="0.1" min="0" max="5" value="0"></label>
               </div>
               <label>Genres<div class="adm-genres" id="genreBoxes"></div></label>
               <label>Summary<textarea name="summary" placeholder="One paragraph per line"></textarea></label>
@@ -150,14 +150,14 @@
   </main>
   <div id="siteFooter"></div>
 
-  <script src="js/skeleton.js?v=20261013a"></script>
+  <script src="js/skeleton.js?v=20261013b"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
-  <script src="js/config.js?v=20261013a"></script>
-  <script src="js/data.js?v=20261013a"></script>
-  <script src="js/app.js?v=20261013a"></script>
+  <script src="js/config.js?v=20261013b"></script>
+  <script src="js/data.js?v=20261013b"></script>
+  <script src="js/app.js?v=20261013b"></script>
   <script>
     document.addEventListener("app:ready", async () => {
       const { $, $$, esc, q, breadcrumb, I } = UI;
@@ -231,7 +231,7 @@
       function fill(n) {
         cur = n;
         nf.slug.value = n ? n.slug : ""; nf.title.value = n ? n.title : ""; nf.author.value = n ? n.author || "" : ""; nf.lang.value = n ? n.lang : DB.LANGS[0];
-        nf.status.value = n ? n.status : "Ongoing"; nf.rating.value = n ? n.rating || 0 : 0; nf.summary.value = n ? (Array.isArray(n.summary) ? n.summary.join("\n") : n.summary || "") : "";
+        nf.status.value = n ? n.status : "Ongoing"; nf.rating.value = n ? (n.baseRating !== undefined ? n.baseRating : n.rating) || 0 : 0; nf.summary.value = n ? (Array.isArray(n.summary) ? n.summary.join("\n") : n.summary || "") : "";
         nf.cover.value = n ? n.cover || "" : ""; nf.hot.checked = !!(n && n.hot); $("#coverPrev").src = (n && n.cover) || "";
         $$("#genreBoxes input").forEach(b => b.checked = !!(n && n.genres.includes(b.value)));
         $("#delNovel").style.display = n ? "" : "none"; $("#saveNovel").textContent = n ? "Update novel" : "Create novel";

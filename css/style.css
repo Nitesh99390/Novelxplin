@@ -294,6 +294,30 @@ a.cover:hover, .n-card:hover .cover, .f-card:hover .cover, .rank-list li:hover .
 .novel-head > div { min-width: 0; }
 .novel-head h1 { font-family: var(--font-cond); font-size: 26px; font-weight: 700; line-height: 1.2; margin-bottom: 10px; overflow-wrap: anywhere; letter-spacing: -.02em; }
 .novel-head .stars { font-size: 14px; }
+
+/* ---------- user rating widget (novel page) ---------- */
+.rate-box { margin: 2px 0 12px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 12px; background: linear-gradient(180deg, #fff, var(--bg)); display: flex; flex-direction: column; gap: 6px; transition: opacity .2s; }
+.rate-box.busy { opacity: .6; pointer-events: none; }
+.rate-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.rate-count { color: var(--muted); font-size: 12px; }
+.rate-you { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.rate-label { font-size: 12.5px; font-weight: 600; color: var(--text-2); min-width: 120px; }
+.rate-input { display: inline-flex; gap: 2px; }
+.rate-star { background: none; border: 0; padding: 2px; cursor: pointer; color: #d8dde6; font-size: 24px; line-height: 1; display: inline-flex; transition: transform .15s var(--ease), color .15s; border-radius: 6px; }
+.rate-star .icon { width: 1em; height: 1em; }
+.rate-star:hover { transform: scale(1.18); }
+.rate-star.on { color: var(--star); filter: drop-shadow(0 2px 4px rgba(245, 158, 11, .35)); }
+.rate-star:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.rate-clear { background: none; border: 0; cursor: pointer; font-size: 12px; color: var(--muted); text-decoration: underline; padding: 0; }
+.rate-clear:hover { color: var(--red); }
+.rate-dist { display: grid; gap: 3px; margin-top: 4px; max-width: 260px; }
+.rate-row { display: grid; grid-template-columns: 30px 1fr 28px; align-items: center; gap: 8px; font-size: 11.5px; color: var(--muted); }
+.rate-n { display: inline-flex; align-items: center; gap: 2px; font-weight: 600; color: var(--text-2); }
+.rate-n .icon { color: var(--star); width: 11px; height: 11px; }
+.rate-bar { height: 6px; background: var(--bg-2); border-radius: 999px; overflow: hidden; }
+.rate-bar > span { display: block; height: 100%; background: linear-gradient(90deg, #fbbf24, var(--star)); border-radius: 999px; transition: width .4s var(--ease); }
+.rate-c { text-align: right; font-variant-numeric: tabular-nums; }
+@media (max-width: 480px) { .rate-star { font-size: 28px; } .rate-label { min-width: 0; width: 100%; } }
 .novel-head .info-row { display: grid; grid-template-columns: 112px minmax(0, 1fr); gap: 8px; font-size: 13.5px; padding: 7px 0; border-bottom: 1px solid #f1f3f7; }
 .novel-head .info-row .k { color: var(--muted); display: flex; align-items: center; gap: 7px; font-weight: 500; }
 .novel-head .info-row .k .icon { color: var(--accent); font-size: 14px; }

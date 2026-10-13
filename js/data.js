@@ -89,6 +89,26 @@
     completed(limit) { return novels.filter(n => n.status === "Completed").sort((a, b) => b.rating - a.rating).slice(0, limit || novels.length); },
     byGenre(g) { return novels.filter(n => n.genres.map(x => x.toLowerCase()).includes(String(g).toLowerCase())); },
     search(q) { q = String(q || "").trim().toLowerCase(); if (!q) return []; return novels.filter(n => n.title.toLowerCase().includes(q) || (n.author || "").toLowerCase().includes(q) || n.genres.join(" ").toLowerCase().includes(q)); },
-    rankByRating(limit) { return [...novels].filter(n => n.rating > 0).sort((a, b) => b.rating - a.rating).slice(0, limit || 10); }
+    rankByRating(limit) { return [...novels].filter(n => n.rating > 0).sort((a, b) => b.rating - a.rating).slice(0, limit || 10); },
+
+    /* ---- user ratings (signed-in users, one vote per novel) ---- */
+    async ratingHeaders() {
+      const h = { "Content-Type": "application/json" };
+      const tok = window.Auth && Auth.token ? await Auth.token().catch(() => null) : null;
+      if (tok) h.Authorization = "Bearer " + tok;
+      return h;
+    },
+    // {votes, rating, dist:[n1..n5], baseRating, shown, mine}
+    async rating(slug) { return api(`/api/novels/${encodeURIComponent(slug)}/rating`, { headers: await this.ratingHeaders(), cache: "no-store" }); },
+    async rate(slug, r) {
+      const s = await api(`/api/novels/${encodeURIComponent(slug)}/rating`, { method: "POST", headers: await this.ratingHeaders(), body: JSON.stringify({ rating: r }) });
+      const n = bySlug[slug]; if (n) { n.rating = s.shown; n.votes = s.votes; }
+      return s;
+    },
+    async unrate(slug) {
+      const s = await api(`/api/novels/${encodeURIComponent(slug)}/rating`, { method: "DELETE", headers: await this.ratingHeaders() });
+      const n = bySlug[slug]; if (n) { n.rating = s.shown; n.votes = s.votes; }
+      return s;
+    }
   };
 })();

@@ -25,6 +25,7 @@ const CHAP = path.join(DATA, "chapters");
 const UPLOADS = path.join(DATA, "uploads");
 const CATALOG = path.join(DATA, "catalog.json");
 const ADMINS_FILE = path.join(DATA, "admins.json");
+const RATINGS_FILE = path.join(DATA, "ratings.json");
 const PORT = +process.env.PORT || 3000;
 
 // Owner emails (super-admins): env override or js/config.js. Owners can add/remove
@@ -43,6 +44,7 @@ if (!ADMIN_EMAILS.length) ADMIN_EMAILS = ["bhuimharniteshbhuimhar@gmail.com"];
 for (const d of [DATA, CHAP, UPLOADS]) fs.mkdirSync(d, { recursive: true });
 if (!fs.existsSync(CATALOG)) fs.writeFileSync(CATALOG, "[]");
 if (!fs.existsSync(ADMINS_FILE)) fs.writeFileSync(ADMINS_FILE, "[]");
+if (!fs.existsSync(RATINGS_FILE)) fs.writeFileSync(RATINGS_FILE, "{}");
 
 /* ---------- admins (owner-managed, persisted in data/admins.json) ---------- */
 const OWNERS = ADMIN_EMAILS.slice();
@@ -71,6 +73,40 @@ function saveCatalog() {
   }, 150);
 }
 const bySlug = s => catalog.find(n => n.slug === s);
+
+/* ---------- user ratings (any signed-in Google user, 1 vote per user per novel) ----------
+   data/ratings.json = { [slug]: { [uid]: { r: 1..5, at: ms } } }
+   Novel.rating / Novel.votes are derived from these votes. When a novel has no user votes
+   yet, the admin-entered "base rating" (n.baseRating, set from the admin panel / bot) is shown. */
+let ratings = {};
+try { ratings = JSON.parse(fs.readFileSync(RATINGS_FILE, "utf8")); if (!ratings || typeof ratings !== "object" || Array.isArray(ratings)) ratings = {}; } catch { ratings = {}; }
+let ratingsTimer = null;
+function saveRatings() {
+  clearTimeout(ratingsTimer);
+  ratingsTimer = setTimeout(async () => {
+    const tmp = RATINGS_FILE + ".tmp";
+    await fsp.writeFile(tmp, JSON.stringify(ratings));
+    await fsp.rename(tmp, RATINGS_FILE);
+  }, 150);
+}
+function ratingSummary(slug) {
+  const votes = Object.values(ratings[slug] || {});
+  const dist = [0, 0, 0, 0, 0];
+  let sum = 0;
+  for (const v of votes) { const r = Math.round(+v.r); if (r >= 1 && r <= 5) { dist[r - 1]++; sum += r; } }
+  const count = dist.reduce((a, b) => a + b, 0);
+  return { votes: count, rating: count ? Math.round((sum / count) * 10) / 10 : 0, dist };
+}
+// recompute n.rating / n.votes from user votes (falls back to admin base rating)
+function applyRating(n) {
+  if (n.baseRating === undefined) n.baseRating = Math.max(0, Math.min(5, +n.rating || 0));
+  const s = ratingSummary(n.slug);
+  n.votes = s.votes;
+  n.rating = s.votes ? s.rating : n.baseRating;
+  return s;
+}
+// one-time migration for catalogs created before user ratings existed
+{ let changed = false; for (const n of catalog) { if (n.baseRating === undefined) changed = true; applyRating(n); } if (changed) saveCatalog(); }
 const slugify = s => String(s).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "").slice(0, 120);
 const safeNum = n => { n = parseInt(n, 10); return Number.isFinite(n) && n > 0 && n < 100000 ? n : null; };
 const chapDir = slug => path.join(CHAP, slug);
@@ -138,6 +174,19 @@ async function requireAdmin(req) {
   p.owner = isOwner(p.email);
   return p;
 }
+// Any signed-in Google user (library/ratings). Returns { uid, email, name }.
+async function requireUser(req) {
+  const auth = req.headers.authorization || "";
+  const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
+  if (!token) throw Object.assign(new Error("Login required"), { status: 401 });
+  if (process.env.ADMIN_DEV_TOKEN && token === process.env.ADMIN_DEV_TOKEN) return { uid: "dev-user", email: OWNERS[0], name: "Dev", dev: true };
+  let p; try { p = await verifyIdToken(token); } catch (e) { throw Object.assign(new Error("Invalid token: " + e.message), { status: 401 }); }
+  const uid = String(p.sub || p.user_id || "").replace(/[^A-Za-z0-9_-]/g, "").slice(0, 128);
+  if (!uid) throw Object.assign(new Error("Invalid token: no uid"), { status: 401 });
+  return { uid, email: p.email, name: p.name || "" };
+}
+// optional auth: returns user or null (never throws)
+async function optionalUser(req) { try { return await requireUser(req); } catch { return null; } }
 async function requireOwner(req) {
   const u = await requireAdmin(req);
   if (!u.owner) throw Object.assign(new Error("Only the site owner can manage admins"), { status: 403 });
@@ -291,7 +340,11 @@ function sanitizeNovel(body, existing) {
   if (body.summary !== undefined) n.summary = Array.isArray(body.summary) ? body.summary.map(String) : splitParas(body.summary);
   if (body.cover !== undefined) n.cover = String(body.cover || "").slice(0, 500);
   if (body.hot !== undefined) n.hot = !!body.hot;
-  if (body.rating !== undefined) n.rating = Math.max(0, Math.min(5, +body.rating || 0));
+  // admin-entered rating = base rating; shown until real users have voted
+  if (body.rating !== undefined || body.baseRating !== undefined) {
+    n.baseRating = Math.max(0, Math.min(5, +(body.baseRating !== undefined ? body.baseRating : body.rating) || 0));
+    if (n.slug) applyRating(n); else n.rating = n.baseRating;
+  }
   if (body.color !== undefined) n.color = String(body.color || "").slice(0, 20);
   if (body.glyph !== undefined) n.glyph = String(body.glyph || "").slice(0, 4);
   return n;
@@ -302,7 +355,7 @@ function createNovel(body) {
   const n = sanitizeNovel(body);
   let s = slugify(body.slug || n.title) || "novel"; let base = s, i = 2; while (bySlug(s)) s = `${base}-${i++}`;
   Object.assign(n, { slug: s, chapters: 0, views: 0, votes: 0, latest: null, createdAt: Date.now(), updatedAt: Date.now() });
-  n.rating = n.rating || 0; n.genres = n.genres && n.genres.length ? n.genres : ["Fantasy"]; n.lang = n.lang || "English Novel"; n.status = n.status || "Ongoing"; n.summary = n.summary || [];
+  n.baseRating = Math.max(0, Math.min(5, +n.baseRating || +n.rating || 0)); n.rating = n.baseRating; n.genres = n.genres && n.genres.length ? n.genres : ["Fantasy"]; n.lang = n.lang || "English Novel"; n.status = n.status || "Ongoing"; n.summary = n.summary || [];
   catalog.unshift(n); fs.mkdirSync(chapDir(s), { recursive: true }); saveCatalog(); smInvalidate();
   return n;
 }
@@ -388,7 +441,28 @@ async function handle(req, res) {
       if (!sub) {
         if (req.method === "GET") return send(res, 200, n);
         if (req.method === "PUT") { await requireAdmin(req); const body = await readJSON(req, 2 * 1024 * 1024); sanitizeNovel(body, n); n.updatedAt = Date.now(); saveCatalog(); smInvalidate(); return send(res, 200, n); }
-        if (req.method === "DELETE") { await requireAdmin(req); catalog = catalog.filter(x => x.slug !== slug); saveCatalog(); smInvalidate(); await fsp.rm(chapDir(slug), { recursive: true, force: true }); return send(res, 200, { ok: true }); }
+        if (req.method === "DELETE") { await requireAdmin(req); catalog = catalog.filter(x => x.slug !== slug); delete ratings[slug]; saveRatings(); saveCatalog(); smInvalidate(); await fsp.rm(chapDir(slug), { recursive: true, force: true }); return send(res, 200, { ok: true }); }
+      }
+      // ---- user ratings: GET summary (+ my vote when signed in) · POST {rating:1-5} · DELETE my vote ----
+      if (sub === "rating") {
+        const summary = u => Object.assign(ratingSummary(slug), { baseRating: n.baseRating || 0, shown: n.rating, mine: u && ratings[slug] && ratings[slug][u.uid] ? ratings[slug][u.uid].r : 0 });
+        if (req.method === "GET") return send(res, 200, summary(await optionalUser(req)), { "Cache-Control": "no-cache" });
+        if (req.method === "POST") {
+          const u = await requireUser(req);
+          const body = await readJSON(req, 16 * 1024);
+          const r = Math.round(+body.rating);
+          if (!(r >= 1 && r <= 5)) return send(res, 400, { error: "Rating must be 1-5" });
+          (ratings[slug] = ratings[slug] || {})[u.uid] = { r, at: Date.now() };
+          applyRating(n); saveRatings(); saveCatalog();
+          return send(res, 200, summary(u));
+        }
+        if (req.method === "DELETE") {
+          const u = await requireUser(req);
+          if (ratings[slug] && ratings[slug][u.uid]) { delete ratings[slug][u.uid]; if (!Object.keys(ratings[slug]).length) delete ratings[slug]; }
+          applyRating(n); saveRatings(); saveCatalog();
+          return send(res, 200, summary(u));
+        }
+        return send(res, 405, { error: "Method not allowed" });
       }
       if (sub === "view" && req.method === "POST") { n.views = (n.views || 0) + 1; saveCatalog(); return send(res, 200, { views: n.views }); }
       if (sub === "chapters") {
@@ -428,7 +502,7 @@ async function handle(req, res) {
     // full backup (tar-less: single JSON with everything) – admin only
     if (seg[1] === "backup" && req.method === "GET") {
       await requireAdmin(req);
-      const out = { exportedAt: new Date().toISOString(), novels: [] };
+      const out = { exportedAt: new Date().toISOString(), ratings, novels: [] };
       for (const n of catalog) {
         const idx = await chapterIndex(n.slug); const chapters = [];
         for (const c of idx) { try { chapters.push(JSON.parse(await fsp.readFile(chapFile(n.slug, c.num), "utf8"))); } catch { } }
