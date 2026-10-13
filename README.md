@@ -185,6 +185,23 @@ For local dev without Firebase: `ADMIN_DEV_TOKEN=dev node server.js` and open `/
 **Search Console**: *Sitemaps → Add a new sitemap →* `https://novelxplin.in/sitemap.xml` → Submit.
 Google reads the index and discovers all ~220 child sitemaps (and 180k+ chapter URLs) automatically.
 
+## Advanced reader (`js/reader.js`)
+
+`read.html` is powered by `js/reader.js` (shared `app.js`/`data.js` stay unchanged):
+
+| Feature | How |
+|---|---|
+| Reading progress | 3 px bar at the top + `%` in the reader bar; scroll position is saved per chapter and restored on return |
+| Focus mode | eye icon / **F** – hides header, nav, comments; tap text or **Esc** to exit |
+| Auto-scroll | arrows icon / **S** – floating bar with speed 1–10 |
+| Listen (TTS) | speaker icon / **L** – browser `speechSynthesis`, paragraph highlight, prev/next, speed, voice picker; click a paragraph to jump |
+| 7 themes | Paper · Light · Sepia · Eye-care green · Dark · Night blue · AMOLED (**T** cycles) |
+| Typography | 5 fonts (Serif, Sans, Merriweather, Lora, OpenDyslexic*), size 14–30, line-height, paragraph spacing, width 560–1200, left/justify, reset |
+| Navigation | ← → keys, **swipe** left/right on phone, chapter-end card with Next/Prev + share, next chapter prefetched |
+| Mobile | header + reader bar auto-hide while scrolling down, re-appear on scroll up |
+
+\*OpenDyslexic falls back to a system font unless installed on the device. Preferences persist in `localStorage` (`nx_reader`).
+
 ## Loading skeletons
 
 Every page loads `js/skeleton.js` **first** (before Firebase). It synchronously paints grey

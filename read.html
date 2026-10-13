@@ -4,15 +4,18 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Read - Novelxplin</title>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Sora:wght@600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Sora:wght@600;700&family=Merriweather:wght@400;700&family=Lora:wght@400;700&display=swap" rel="stylesheet">
   <link rel="icon" type="image/svg+xml" href="/img/favicon.svg">
   <link rel="stylesheet" href="/css/style.css?v=20261013c">
 </head>
 <body class="reader-page">
+  <div class="read-progress" id="readProgress" aria-hidden="true"></div>
   <div id="siteHeader"></div>
   <div class="reader-top"><div class="wrap">
     <a href="/" title="Home"></a>
     <span class="novel-title truncate" id="rtTitle" data-sk="title"></span>
+    <span class="rt-pct" id="rtPct" title="Reading progress">0%</span>
+    <span class="rt-tools" id="rtTools"></span>
     <a class="btn ghost" href="#" id="rtLib"></a>
     <button class="btn ghost icon-btn" id="rtSettings" title="Reader settings" aria-label="Reader settings" aria-expanded="false"></button>
     <div class="reader-settings" id="settings" role="dialog" aria-label="Reader settings" hidden>
@@ -21,13 +24,31 @@
         <button data-theme="paper" title="Paper"><span class="sw" style="background:#f4f1ea;border-color:#ccc"></span></button>
         <button data-theme="light" title="Light"><span class="sw" style="background:#fff;border-color:#ccc"></span></button>
         <button data-theme="sepia" title="Sepia"><span class="sw" style="background:#e9dcc4"></span></button>
+        <button data-theme="green" title="Eye-care green"><span class="sw" style="background:#cfe3c4"></span></button>
         <button data-theme="dark" title="Dark"><span class="sw" style="background:#1c1c1c"></span></button>
+        <button data-theme="night" title="Night blue"><span class="sw" style="background:#0b1220"></span></button>
+        <button data-theme="oled" title="AMOLED black"><span class="sw" style="background:#000"></span></button>
       </div>
       <div class="grp"><label>Font size</label><button data-size="-1">A-</button><button id="sizeLabel" disabled></button><button data-size="1">A+</button></div>
-      <div class="grp"><label>Font</label><button data-font="serif">Serif</button><button data-font="sans">Sans</button></div>
-      <div class="grp"><label>Line height</label><button data-lh="1.6">1.6</button><button data-lh="1.8">1.8</button><button data-lh="2.1">2.1</button></div>
+      <div class="grp"><label>Font</label><button data-font="serif">Serif</button><button data-font="sans">Sans</button><button data-font="merri">Merriweather</button><button data-font="lora">Lora</button><button data-font="dys">Dyslexic</button></div>
+      <div class="grp"><label>Line height</label><button data-lh="1.5">1.5</button><button data-lh="1.6">1.6</button><button data-lh="1.8">1.8</button><button data-lh="2.1">2.1</button></div>
+      <div class="grp"><label>Paragraph</label><button data-pspace="0.6">Tight</button><button data-pspace="1.1">Normal</button><button data-pspace="1.7">Loose</button></div>
+      <div class="grp"><label>Width</label><button data-width="-100">&minus;</button><button id="widthLabel" disabled></button><button data-width="100">+</button></div>
+      <div class="grp"><label>Align</label><button data-align="left">Left</button><button data-align="justify">Justify</button></div>
+      <div class="grp rs-foot"><button id="rsReset">Reset to defaults</button><span class="kb-hint">Keys: ← → chapters · F focus · S auto-scroll · L listen · T theme · +/- size</span></div>
     </div>
   </div></div>
+
+  <div class="float-bar" id="autoBar" hidden>
+    <span>Auto-scroll</span><button data-as="-1">&minus;</button><b id="asVal">2</b><button data-as="1">+</button><button id="asStop" class="stop">Stop</button>
+  </div>
+  <div class="float-bar tts" id="ttsBar" hidden>
+    <span>Listening</span>
+    <button id="ttsPrev" title="Previous paragraph">&#9664;</button><button id="ttsPause">Pause</button><button id="ttsNext" title="Next paragraph">&#9654;</button>
+    <button data-rate="-0.1">&minus;</button><b id="ttsRateVal">1x</b><button data-rate="0.1">+</button>
+    <select id="ttsVoice" aria-label="Voice"></select>
+    <button id="ttsStop" class="stop">Stop</button>
+  </div>
 
   <main class="reader-wrap">
     <div class="reader-nav" id="navTop" data-sk="nav"></div>
@@ -52,102 +73,6 @@
   <script src="/js/config.js?v=20261013c"></script>
   <script src="/js/data.js?v=20261013c"></script>
   <script src="/js/app.js?v=20261013c"></script>
-  <script>
-    document.addEventListener("app:ready", async () => {
-      const { $, $$, esc, q, U, I } = UI;
-      const n = DB.get(q.get("n"));
-      const c = Math.max(1, parseInt(q.get("c") || "1", 10));
-      if (!n || c > n.chapters) { SK.clear(); $("#content").innerHTML = `<div class="empty">${I.search}<div>Chapter not found.</div></div>`; return; }
-      Lib.mark(n.id, c);
-
-      $(".reader-top a[title=Home]").innerHTML = I.home;
-      const libBtn = $("#rtLib");
-      const setLib = () => libBtn.innerHTML = `${I.heart} ${Lib.has(n.id) ? "In Library" : "Add to Library"}`;
-      setLib();
-      libBtn.addEventListener("click", e => { e.preventDefault(); const a = Lib.toggle(n.id); setLib(); toast(a ? "Added to your library" : "Removed from library"); });
-
-      const link = (cc) => U.chapter(n.slug, cc);
-      let index = [];
-      try { index = await DB.chapters(n.slug); } catch { }
-      const titleOf = cc => { const x = index.find(i => i.num === cc); return x && x.title ? x.title : `Chapter ${cc}`; };
-      const title = titleOf(c);
-      document.title = `${n.title} - ${title} | Novelxplin`;
-      $("#rtTitle").innerHTML = `<a href="${U.novel(n.slug)}">${esc(n.title)}</a> <span style="color:var(--muted)">/ ${esc(title)}</span>`;
-
-      function nav() {
-        const sel = `<select onchange="location.href=this.value">${index.map(ch => `<option value="${link(ch.num)}" ${ch.num === c ? "selected" : ""}>${esc(ch.title || "Chapter " + ch.num)}</option>`).join("")}</select>`;
-        return `<a class="btn alt ${c <= 1 ? "disabled" : ""}" href="${link(c - 1)}">${I.left} Prev</a>
-          <a class="btn ghost" href="${U.novel(n.slug)}">${I.list} Index</a>
-          ${sel}
-          <a class="btn ${c >= n.chapters ? "disabled" : ""}" href="${link(c + 1)}">Next ${I.right}</a>`;
-      }
-      $("#navTop").innerHTML = nav(); $("#navBottom").innerHTML = nav();
-
-      $("#content").innerHTML = SK.html("reader", 4);
-      try {
-        const ch = await DB.chapter(n.slug, c);
-        const body = Array.isArray(ch.body) ? ch.body : String(ch.body || "").split(/\n{2,}|\n/).filter(Boolean);
-        const words = body.join(" ").split(/\s+/).length;
-        $("#content").innerHTML = `<h1>${esc(ch.title || title)}</h1><div class="sub">${esc(n.title)} &middot; ${esc((ch.date || "").slice(0, 10))} &middot; ${words} words</div>` + body.map(p => `<p>${esc(p)}</p>`).join("");
-      } catch (e) { $("#content").innerHTML = `<div class="empty">${I.search}<div>Failed to load chapter: ${esc(e.message)}</div></div>`; }
-
-      // settings
-      const prefs = Object.assign({ theme: "paper", size: 18, font: "serif", lh: 1.8 }, JSON.parse(localStorage.getItem("nx_reader") || "{}"));
-      function apply() {
-        document.body.className = `reader-page theme-${prefs.theme}`;
-        document.documentElement.style.setProperty("--read-size", prefs.size + "px");
-        document.documentElement.style.setProperty("--read-lh", prefs.lh);
-        document.documentElement.style.setProperty("--read-font", prefs.font === "serif" ? 'Georgia, "Times New Roman", serif' : '"Roboto", "Segoe UI", Arial, sans-serif');
-        $("#sizeLabel").textContent = prefs.size + "px";
-        $$("[data-theme]").forEach(b => b.querySelector(".sw").classList.toggle("active", b.dataset.theme === prefs.theme));
-        $$("[data-font]").forEach(b => b.classList.toggle("active", b.dataset.font === prefs.font));
-        $$("[data-lh]").forEach(b => b.classList.toggle("active", +b.dataset.lh === +prefs.lh));
-        localStorage.setItem("nx_reader", JSON.stringify(prefs));
-      }
-      // settings popover toggle (gear icon in top bar)
-      const panel = $("#settings"), gear = $("#rtSettings");
-      gear.innerHTML = I.gear;
-      const setOpen = (o) => { panel.hidden = !o; panel.classList.toggle("open", o); gear.classList.toggle("active", o); gear.setAttribute("aria-expanded", o); document.body.classList.toggle("rs-open", o); };
-      gear.addEventListener("click", e => { e.stopPropagation(); setOpen(panel.hidden); });
-      $("#rsClose").addEventListener("click", () => setOpen(false));
-      document.addEventListener("click", e => { if (!panel.hidden && !panel.contains(e.target) && !gear.contains(e.target)) setOpen(false); });
-      document.addEventListener("keydown", e => { if (e.key === "Escape" && !panel.hidden) setOpen(false); });
-
-      $("#settings").addEventListener("click", e => {
-        const b = e.target.closest("button"); if (!b || b.id === "rsClose") return;
-        if (b.dataset.theme) prefs.theme = b.dataset.theme;
-        if (b.dataset.size) prefs.size = Math.max(14, Math.min(28, prefs.size + +b.dataset.size));
-        if (b.dataset.font) prefs.font = b.dataset.font;
-        if (b.dataset.lh) prefs.lh = +b.dataset.lh;
-        apply();
-      });
-      apply();
-
-      document.addEventListener("keydown", e => {
-        if (e.target.tagName === "TEXTAREA" || e.target.tagName === "INPUT") return;
-        if (e.key === "ArrowLeft" && c > 1) location.href = link(c - 1);
-        if (e.key === "ArrowRight" && c < n.chapters) location.href = link(c + 1);
-      });
-
-      // comments – Firestore when available, else local
-      const key = `nx_comments_${n.id}_${c}`;
-      const colors = ["#e67e22", "#1e73be", "#2e9e4f", "#7e57c2", "#e53935"];
-      const col = window.firebase && Auth.enabled ? firebase.firestore().collection("comments").doc(n.slug).collection(String(c)) : null;
-      const show = list => $("#comments").innerHTML = list.length ? list.map((cm, i) => `<div class="comment"><div class="avatar" style="background:${colors[i % colors.length]}">${esc((cm.who || "?")[0])}</div><div><div class="who">${esc(cm.who)}<small>${DB.timeAgo(Math.round((Date.now() - cm.at) / 6e4))}</small></div><p>${esc(cm.text)}</p></div></div>`).join("") : `<p style="color:var(--muted);font-size:12px;margin-top:10px">No comments yet. Be the first!</p>`;
-      async function renderComments() {
-        if (col) { try { const s = await Promise.race([col.orderBy("at", "desc").limit(50).get(), new Promise((_, rej) => setTimeout(() => rej(new Error("comments timeout")), 8000))]); return show(s.docs.map(d => d.data())); } catch (e) { console.warn(e); } }
-        show(JSON.parse(localStorage.getItem(key) || "[]"));
-      }
-      $("#cPost").addEventListener("click", async () => {
-        const u = Auth.user(); if (!u) { openLogin(); return; }
-        const t = $("#cText").value.trim(); if (!t) return;
-        const cm = { who: u.name, uid: u.uid || "", text: t.slice(0, 2000), at: Date.now() };
-        if (col) { try { await col.add(cm); } catch (e) { toast("Failed: " + e.message); return; } }
-        else { const list = JSON.parse(localStorage.getItem(key) || "[]"); list.unshift(cm); localStorage.setItem(key, JSON.stringify(list)); }
-        $("#cText").value = ""; renderComments(); toast("Comment posted");
-      });
-      renderComments();
-    });
-  </script>
+  <script src="/js/reader.js?v=20261013d"></script>
 </body>
 </html>
