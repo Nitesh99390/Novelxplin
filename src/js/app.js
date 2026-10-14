@@ -94,7 +94,9 @@
   const CFG = window.NX_CONFIG || {};
   const store = {
     get(k, d) { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } },
-    set(k, v) { localStorage.setItem(k, JSON.stringify(v)); }
+    // never throw: localStorage can be disabled (blocked third-party cookies / site data,
+    // private mode, quota full). A throw here used to abort the boot chain → blank page.
+    set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch { } }
   };
   const fbReady = !!(window.firebase && CFG.FIREBASE && CFG.FIREBASE.apiKey && !/^PASTE_/.test(CFG.FIREBASE.apiKey));
   let fbAuth = null, fbDb = null, curUser = null;
@@ -157,7 +159,16 @@
       if (!fbAuth) return null;
       if (!fbAuth.currentUser) { try { await Promise.race([Auth.ready, new Promise(r => setTimeout(r, 4000))]); } catch { } }
       if (!fbAuth.currentUser) return null;
-      const t = await fbAuth.currentUser.getIdToken(); tokCache.set(t, fbAuth.currentUser.uid); return t;
+      // Never let a stuck Firebase token refresh hang the chapter request forever – a
+      // non-resolving getIdToken() is exactly the "spinner in normal Chrome, fine in
+      // incognito" symptom. Fall back to the current (possibly refreshed) token.
+      try {
+        const t = await Promise.race([
+          fbAuth.currentUser.getIdToken(),
+          new Promise((_, rej) => setTimeout(() => rej(new Error("token timeout")), 8000))
+        ]);
+        tokCache.set(t, fbAuth.currentUser.uid); return t;
+      } catch { return fbAuth.currentUser ? await fbAuth.currentUser.getIdToken().catch(() => null) : null; }
     },
     async login() {
       if (!fbAuth) { toast("Firebase config missing – set js/config.js"); return null; }
@@ -166,15 +177,25 @@
     },
     async refreshToken() { tokCache.clear(); if (!fbAuth || !fbAuth.currentUser) return null; try { const t = await fbAuth.currentUser.getIdToken(true); tokCache.set(t, fbAuth.currentUser.uid); return t; } catch { return null; } },
     async logout() { localStorage.removeItem("nx_user"); tokCache.clear(); if (fbAuth) await fbAuth.signOut(); },
-    // resolves once initial auth state is known
+    // resolves once initial auth state is known. Never rejects: if Firebase's persisted
+    // session is stale/broken (common on a device that was already signed in — the token
+    // cache no longer matches, storage is corrupted, or a Firestore call hangs) we still
+    // resolve so the rest of the app boots and chapters can load. Incognito/another
+    // browser has no such stale state, which is why it worked there.
     ready: new Promise(res => {
       if (!fbAuth) return res(null);
+      let settled = false;
+      const done = u => { if (settled) return; settled = true; res(u); };
+      // safety net: never let a stuck Firebase restore block the whole site (app:ready)
+      setTimeout(() => done(fbAuth.currentUser || null), 8000);
       const off = fbAuth.onAuthStateChanged(async u => {
         curUser = u;
         if (!u) tokCache.clear(); else u.getIdToken().then(t => tokCache.set(t, u.uid)).catch(() => { }); // warm / refresh the cache
-        if (u) { const role = await resolveRole(u); store.set("nx_user", { uid: u.uid, name: u.displayName || u.email.split("@")[0], email: u.email, photo: u.photoURL || "", admin: role.admin, owner: role.owner }); await Lib.pull(); }
-        else localStorage.removeItem("nx_user");
-        res(u); off && typeof off === "function" && 0; // keep listening for later changes
+        try {
+          if (u) { const role = await resolveRole(u); store.set("nx_user", { uid: u.uid, name: u.displayName || u.email.split("@")[0], email: u.email, photo: u.photoURL || "", admin: role.admin, owner: role.owner }); await Lib.pull(); }
+          else localStorage.removeItem("nx_user");
+        } catch (e) { console.warn("auth restore", e && e.message); }
+        done(u); off && typeof off === "function" && 0; // keep listening for later changes
         document.dispatchEvent(new CustomEvent("auth:change", { detail: u }));
       });
     })
@@ -337,7 +358,11 @@
 
   /* ---------- Boot ---------- */
   document.addEventListener("DOMContentLoaded", async () => {
-    await Promise.all([DB.ready, Auth.ready]);
+    // Never let a slow / broken Firebase session restore (or any UI error) stop the rest of
+    // the site: app:ready must ALWAYS fire, otherwise the reader never starts and the chapter
+    // area stays a blank skeleton. Incognito has no stale session, which is why it worked there.
+    try { await Promise.all([DB.ready, Auth.ready]); } catch (e) { console.warn("boot", e && e.message); }
+    try {
     const h = $("#siteHeader"); if (h) h.innerHTML = header();
     if (DB.error) toast("Could not reach novel server: " + DB.error.message);
     const f = $("#siteFooter"); if (f) f.innerHTML = footer();
@@ -377,6 +402,7 @@
     const tt = $("#toTop");
     window.addEventListener("scroll", () => tt && tt.classList.toggle("show", scrollY > 400), { passive: true });
     tt?.addEventListener("click", () => scrollTo({ top: 0, behavior: "smooth" }));
+    } catch (e) { console.warn("ui init", e && e.message); }
 
     document.dispatchEvent(new CustomEvent("app:ready"));
 

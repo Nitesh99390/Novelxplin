@@ -320,6 +320,9 @@ function guardChapter(req) {
        account, not reversible, but matchable against our own records if a dump leaks. */
 const QUOTA_DAY = Math.max(1, +process.env.CHAPTER_QUOTA_DAY || 1000);
 const QUOTA_WINDOW = Math.max(1, +process.env.CHAPTER_QUOTA_WINDOW_H || 24) * 3600000;
+// Log the effective value at boot: if an old CHAPTER_QUOTA_DAY env is still set on the server
+// (e.g. =50) it overrides this default, so this line makes that obvious in the logs.
+console.log(`[quota] daily chapter limit = ${QUOTA_DAY} per ${QUOTA_WINDOW / 3600000}h${process.env.CHAPTER_QUOTA_DAY ? " (from CHAPTER_QUOTA_DAY env)" : " (default)"}`);
 const QUOTA_FILE = path.join(DATA, "quota.json");
 let quota = {}; // uid -> { [slug/num]: ms }
 try { quota = JSON.parse(fs.readFileSync(QUOTA_FILE, "utf8")); if (!quota || typeof quota !== "object") quota = {}; } catch { quota = {}; }

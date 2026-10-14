@@ -6,6 +6,18 @@
    • next-chapter prefetch + infinite "continue" • extra themes, width, align, spacing
    ========================================================= */
 document.addEventListener("app:ready", async () => {
+  // Failsafe: if the reader init throws before it paints the chapter (bad cached prefs,
+  // storage disabled, an API hiccup), don't leave the shimmer skeleton on screen forever.
+  let painted = false;
+  const failSafe = setTimeout(() => {
+    if (painted) return;
+    try {
+      const el = document.getElementById("content");
+      if (el && !el.querySelector("h1, p")) el.innerHTML = `<div class="empty">Could not open this chapter. <a href="${location.pathname.replace(/\/chapter-\d+.*$/, "")}">Back to chapter list</a></div>`;
+      if (window.SK) SK.clear();
+    } catch { }
+  }, 15000);
+  try {
   const { $, $$, esc, q, U, I } = UI;
   const n = DB.get(q.get("n"));
   let c = Math.max(1, parseInt(q.get("c") || "1", 10));
@@ -163,7 +175,7 @@ document.addEventListener("app:ready", async () => {
     $$("[data-lh]").forEach(b => b.classList.toggle("active", +b.dataset.lh === +prefs.lh));
     $$("[data-align]").forEach(b => b.classList.toggle("active", b.dataset.align === prefs.align));
     $$("[data-pspace]").forEach(b => b.classList.toggle("active", +b.dataset.pspace === +prefs.pspace));
-    localStorage.setItem("nx_reader", JSON.stringify(prefs));
+    try { localStorage.setItem("nx_reader", JSON.stringify(prefs)); } catch { }
     // theme-color for mobile browsers
     const tc = { paper: "#f6f3ec", light: "#f3f4f8", sepia: "#e9dcc4", dark: "#141414", night: "#0b1220", oled: "#000000", green: "#e3eedd" }[prefs.theme] || "#f6f3ec";
     let m = $('meta[name=theme-color]'); if (!m) { m = document.createElement("meta"); m.name = "theme-color"; document.head.appendChild(m); } m.content = tc;
@@ -235,7 +247,7 @@ document.addEventListener("app:ready", async () => {
   autoBtn.addEventListener("click", () => setAuto(!autoOn));
   autoBar.addEventListener("click", e => {
     const b = e.target.closest("button"); if (!b) return;
-    if (b.dataset.as) { prefs.autoSpeed = Math.max(1, Math.min(10, prefs.autoSpeed + +b.dataset.as)); $("#asVal").textContent = prefs.autoSpeed; localStorage.setItem("nx_reader", JSON.stringify(prefs)); }
+    if (b.dataset.as) { prefs.autoSpeed = Math.max(1, Math.min(10, prefs.autoSpeed + +b.dataset.as)); $("#asVal").textContent = prefs.autoSpeed; try { localStorage.setItem("nx_reader", JSON.stringify(prefs)); } catch { } }
     if (b.id === "asStop") setAuto(false);
   });
   ["wheel", "touchstart"].forEach(ev => addEventListener(ev, () => { if (autoOn) { acc = 0; } }, { passive: true }));
@@ -267,7 +279,7 @@ document.addEventListener("app:ready", async () => {
   const savePos = i => { try { const a = posAll(); a[n.id] = { c, i, t: Date.now() }; const ks = Object.keys(a); if (ks.length > 40) delete a[ks.sort((x, y) => a[x].t - a[y].t)[0]]; localStorage.setItem(POS_KEY, JSON.stringify(a)); } catch { } };
   const savedPos = () => { const p = posAll()[n.id]; return p && p.c === c ? p.i : -1; };
   const visiblePara = () => { const mid = innerHeight * 0.4; let best = 0; for (const p of pEls()) { const r = p.getBoundingClientRect(); if (r.bottom >= mid) { best = +p.dataset.i; break; } best = +p.dataset.i; } return best; };
-  const savePrefs = () => localStorage.setItem("nx_reader", JSON.stringify(prefs));
+  const savePrefs = () => { try { localStorage.setItem("nx_reader", JSON.stringify(prefs)); } catch { } };
   // prefs: ttsVoice = exact voice name (empty → auto), ttsLang = hi-IN | en-IN | en-US | …, ttsGender = "" | ♀ | ♂
   prefs.ttsEngine = "device"; // single engine now; kept so old saved prefs stay valid
   if (!["hi-IN", "en-IN", "en-US", "en-GB", "en-AU", "auto"].includes(prefs.ttsLang)) prefs.ttsLang = "auto";
@@ -540,8 +552,19 @@ document.addEventListener("app:ready", async () => {
     const t = $("#cText").value.trim(); if (!t) return;
     const cm = { who: u.name, uid: u.uid || "", text: t.slice(0, 2000), at: Date.now() };
     if (col) { try { await col.add(cm); } catch (e) { toast("Failed: " + e.message); return; } }
-    else { const list = JSON.parse(localStorage.getItem(ckey) || "[]"); list.unshift(cm); localStorage.setItem(ckey, JSON.stringify(list)); }
+    else { let list = []; try { list = JSON.parse(localStorage.getItem(ckey) || "[]"); } catch { } list.unshift(cm); try { localStorage.setItem(ckey, JSON.stringify(list)); } catch { } }
     $("#cText").value = ""; renderComments(); toast("Comment posted");
   });
   bindComments();
+  painted = true;
+  clearTimeout(failSafe);
+  } catch (e) {
+    console.warn("reader init", e && e.message);
+    clearTimeout(failSafe);
+    try {
+      const el = document.getElementById("content");
+      if (el && !el.querySelector("h1, p")) el.innerHTML = `<div class="empty">Could not open this chapter. <a href="${location.pathname.replace(/\/chapter-\d+.*$/, "")}">Back to chapter list</a></div>`;
+      if (window.SK) SK.clear();
+    } catch { }
+  }
 });
